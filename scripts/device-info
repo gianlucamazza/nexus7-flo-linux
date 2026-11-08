@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""Print the pinned upstream flo definition without executing shell code."""
+import json, re
+from pathlib import Path
+root = Path(__file__).resolve().parents[1]
+path = root/'upstream/pmaports/device/testing/device-asus-flo/deviceinfo'
+fields = dict(re.findall(r'^(deviceinfo_\w+)="([^"\n]*)"$', path.read_text(), re.M))
+if fields.get('deviceinfo_codename') != 'asus-flo' or fields.get('deviceinfo_arch') != 'armv7':
+    raise SystemExit('Definizione inattesa: verificare i sorgenti prima di procedere.')
+print(json.dumps(fields, indent=2))

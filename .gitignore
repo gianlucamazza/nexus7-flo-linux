@@ -1,0 +1,9 @@
+/tools/
+/downloads/
+/upstream/
+/build/
+/backups/*
+/reports/*
+/artifacts/*
+/config/pmbootstrap.cfg
+__pycache__/

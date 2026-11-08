@@ -1,0 +1,25 @@
+{
+  "prepared": "2026-11-08",
+  "sources": {
+    "pmbootstrap": {
+      "url": "https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git",
+      "commit": "e0dfe2cda7f3a0b70cdcc96f3060100839322aa4"
+    },
+    "pmaports": {
+      "url": "https://gitlab.postmarketos.org/postmarketOS/pmaports.git",
+      "commit": "fa22430585a13f949029cfbd5d8885b80891d5b9"
+    }
+  },
+  "platform_tools": {
+    "url": "https://dl.google.com/android/repository/platform-tools-latest-linux.zip",
+    "sha256": "d230f13842f60f782a8645f9c813f8f845bf36089ea7289f28c48f17979313f1",
+    "version": "37.0.1-15733141"
+  },
+  "kpartx": {
+    "package": "multipath-tools 0.15.1-1",
+    "url": "https://stable-mirror.omarchy.org/extra/os/x86_64/multipath-tools-0.15.1-1-x86_64.pkg.tar.zst",
+    "sha256": "842ed39596284e8cbdf5ba876a885a5dc941ac9a1e347e6abaad140cea15f078",
+    "signature": "Verified with gpgv against /etc/pacman.d/gnupg/pubring.gpg; Christian Hesse 0429897DE5F3BDAC537A30696D42BDD116E0068F",
+    "extracted": "usr/bin/kpartx only"
+  }
+}

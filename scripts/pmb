@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+export PATH="$ROOT/tools/host/usr/bin:$ROOT/tools/platform-tools:$PATH"
+exec python3 "$ROOT/upstream/pmbootstrap/pmbootstrap.py" \
+  -c "$ROOT/config/pmbootstrap.cfg" -p "$ROOT/upstream/pmaports" \
+  -w "$ROOT/build/pmbootstrap" -l "$ROOT/reports/pmbootstrap.log" "$@"

@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Read-only inventory. Does not reboot, unlock, flash, mount or read raw partitions."""
+import argparse, datetime, json, os, subprocess
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]
+os.umask(0o077)
+p=argparse.ArgumentParser(description=__doc__)
+p.add_argument("--serial", help="Selezione esplicita se sono presenti più dispositivi")
+a=p.parse_args()
+def run(tool, args):
+    try:
+        r=subprocess.run([str(ROOT/"tools/platform-tools"/tool), *args], capture_output=True, text=True, timeout=12)
+        return {"returncode": r.returncode, "stdout": r.stdout.strip(), "stderr": r.stderr.strip()}
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"error": str(e)}
+def rows(result, adb=False):
+    lines=result.get("stdout", "").splitlines()
+    return [line.split() for line in lines if line.strip() and not (adb and line.startswith("List of devices")) and not line.startswith("*")]
+adb=run("adb", ["devices", "-l"])
+fb=run("fastboot", ["devices"])
+ar=rows(adb, True); fr=rows(fb)
+ids={x[0] for x in ar+fr}
+if a.serial and a.serial not in ids:
+    raise SystemExit("Seriale non rilevato. Verificare collegamento e autorizzazione ADB.")
+if not a.serial and len(ids)>1:
+    raise SystemExit("Più dispositivi collegati: usare --serial. Nessuna interrogazione eseguita.")
+serial=a.serial or next(iter(ids), None)
+out={"time": datetime.datetime.now(datetime.timezone.utc).isoformat(), "adb_devices": adb, "fastboot_devices": fb, "selected": serial, "queries": {}}
+if serial:
+    state=next((x[1] for x in ar if x[0]==serial and len(x)>1), None)
+    if state in {"device", "recovery"}:
+        props=["ro.product.device", "ro.product.model", "ro.build.version.release", "ro.build.display.id", "ro.bootloader", "ro.boot.flash.locked", "ro.boot.verifiedbootstate", "ro.twrp.version"]
+        for prop in props:
+            out["queries"][prop]=run("adb", ["-s", serial, "shell", "getprop", prop])
+        product=out["queries"]["ro.product.device"].get("stdout", "")
+        if product in {"flo", "flox"}:
+            for key, cmd in {"battery": ["dumpsys", "battery"], "partitions": ["cat", "/proc/partitions"], "by_name": ["ls", "-l", "/dev/block/platform/msm_sdcc.1/by-name"], "recovery_fstab": ["cat", "/etc/recovery.fstab"]}.items():
+                out["queries"][key]=run("adb", ["-s", serial, "shell", *cmd])
+        else:
+            out["warning"]="Product non confermato flo/flox: raccolte solo proprietà; verificare manualmente."
+    elif any(x[0]==serial for x in fr):
+        product=run("fastboot", ["-s", serial, "getvar", "product"])
+        out["queries"]["product"]=product
+        import re
+        if re.search(r"product:\s*(?:flo|flox)\b", product.get("stdout", "")+product.get("stderr", "")):
+            for var in ["version-bootloader", "unlocked", "secure", "partition-size:boot", "partition-size:recovery", "partition-size:system", "partition-size:userdata"]:
+                out["queries"][var]=run("fastboot", ["-s", serial, "getvar", var])
+        else:
+            out["warning"]="Product non confermato flo/flox; nessun'altra interrogazione."
+    else:
+        out["warning"]=f"ADB in stato {state}: autorizzare il computer o verificare la modalità."
+else:
+    out["warning"]="Nessun dispositivo rilevato. Tablet in carica: ripetere quando collegato."
+path=ROOT/"reports"/("device-"+datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")+".json")
+path.write_text(json.dumps(out, indent=2)+"\n")
+print(out.get("warning", "Acquisizione completata in sola lettura."))
+print(f"Report privato: {path}")
+raise SystemExit(0 if serial and "warning" not in out else 2)

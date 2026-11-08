@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+import datetime, json, os, platform, shutil, subprocess
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
+os.umask(0o077)
+def run(args):
+    try:
+        p = subprocess.run(args, text=True, capture_output=True, timeout=15)
+        return {"returncode": p.returncode, "output": (p.stdout+p.stderr).strip()}
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"error": str(e)}
+checks = {"time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+          "platform": platform.platform(), "free_gib": round(shutil.disk_usage(ROOT).free/2**30, 2)}
+for name, args in {"adb": [str(ROOT/"tools/platform-tools/adb"), "version"],
+                   "fastboot": [str(ROOT/"tools/platform-tools/fastboot"), "--version"],
+                   "pmbootstrap": [str(ROOT/"scripts/pmb"), "--version"],
+                   "profile": [str(ROOT/"scripts/pmb"), "status"]}.items():
+    checks[name] = run(args)
+checks["host_commands"] = {n: shutil.which(n) for n in ["git", "python3", "sudo", "openssl", "tar", "xz", "lsusb"]}
+checks["usb"] = run(["lsusb"])
+checks["note"] = "Nessuna prova sul tablet; permessi USB da verificare al collegamento."
+path=ROOT/"reports"/"host.json"
+path.write_text(json.dumps(checks, indent=2)+"\n")
+print(json.dumps(checks, indent=2))
+print(f"Report: {path}")
+raise SystemExit(1 if any(checks[n].get("returncode", 1) != 0 for n in ["adb", "fastboot", "pmbootstrap"]) else 0)
