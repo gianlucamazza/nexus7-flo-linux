@@ -24,17 +24,6 @@ done
 idx=$((N - 3)); apply "$idx"          # start below the top until temperature is known
 for p in $CF/policy*; do echo schedutil > "$p/scaling_governor"; done
 
-# The brightness restored by systemd-backlight is sent before the DSI panel is
-# on and is lost, leaving the panel at full brightness. Write it once more now
-# that the display is up (this unit starts well after the compositor).
-BL=$(ls -d /sys/class/backlight/* 2>/dev/null | head -1)
-if [ -n "$BL" ]; then
-    want=$(cat "$BL/brightness")
-    if [ "$want" != "$(cat "$BL/actual_brightness")" ]; then
-        [ "$want" -gt 1 ] && echo $((want - 1)) > "$BL/brightness"
-        echo "$want" > "$BL/brightness"
-    fi
-fi
 
 while :; do
     t=$(maxtemp)
