@@ -235,3 +235,44 @@ Da fare nel kernel al posto del servizio: cooling map e `#cooling-cells` per la
 CPU nel device tree dell'APQ8064, e tensione iniziale coerente con l'OPP di
 avvio. Il sensore di `cpu0-thermal` resta fermo allo stesso valore per tutto
 un avvio: da verificare.
+
+## Kernel r11: freno termico nel kernel — 2026-11-15
+
+Il tablet gira su r11 con quattro core. Riga di comando locale:
+`cpuidle.off=1 cpufreq.default_governor=performance`.
+
+- **Patch 0011–0013**: cooling map per la CPU, soglia passiva a 85 °C per il
+  flo, correzione di `tsens-8960` (PR 6 di apq8064-mainline, autore originale
+  mantenuto) che sull'APQ8064 spegneva i sensori 6 e 7. Con il servizio fermo,
+  due minuti a pieno carico su quattro core: massimo 90 °C, frequenza regolata
+  dal kernel tra 1026 e 1242 MHz. `cpu0-thermal` ora si aggiorna.
+- **Spegnimenti termici all'avvio**: avvenivano intorno al secondo 30, perché i
+  core 1–3 partono a 384 MHz e restano a 1,3 V. Con il governor di avvio
+  `performance` il kernel li porta subito a 1512 MHz e la tensione scende a
+  987,5 mV. Il servizio `nexus7-thermal-governor` passa poi a `schedutil`.
+- **Luminosità all'avvio**: il valore ripristinato da systemd-backlight arriva
+  prima che il pannello sia acceso e va perso; il pannello resta a 255 mentre
+  sysfs riporta il valore salvato (−452 mA contro −134 mA a riposo). Il
+  servizio la riscrive una volta quando parte.
+- **Blocco all'avvio (13:48 e successivo)**: due avvii consecutivi bloccati
+  dopo aver cambiato tre cose insieme (servizio termico disattivato, un'unità
+  separata che riscriveva la luminosità ogni 2 s dopo greetd, governor fisso a
+  `performance`). Recuperato da TWRP con `systemd.mask=` e `systemd.wants=`
+  sulla riga di comando; l'unità separata è stata rimossa. Causa non
+  dimostrata: l'ultimo messaggio salvato dell'avvio bloccato è al secondo 17.
+- **GPU**: un'app GTK4 con `GSK_RENDERER=gl` manda in blocco la GPU
+  (`gpu hw init failed: -22`), recuperabile solo con un riavvio. I file locali
+  che forzano `GSK_RENDERER=cairo` vanno lasciati.
+- **Lag dell'interfaccia**: `phosh` è GTK3 e disegna via software; durante lo
+  scorrimento satura un core e i fotogrammi scendono da ~67 a 24–37 al secondo.
+  Animazioni disattivate. La cache L2 resta a 384 MHz (krait-cc); una patch
+  candidata che la porta a 648 MHz è in
+  `~/nexus7-recovery-20261114/candidate-l2-648mhz.patch`, non provata.
+- **USB**: dopo molti collegamenti la porta del portatile ha dato di nuovo
+  `error -71` in recovery; si è risolto ricollegando.
+
+Ricerca del 2026-11-15: nessun albero ha cpufreq o cooling map per APQ8064;
+il display del flo risulta non funzionante sul 7.2 in postmarketOS; la serie
+di Baryshkov del 2023 (krait-l2-cache) non è stata integrata; per gli stati
+di riposo c'è una segnalazione su `pmic_dly` e sulla configurazione SAW2 dei
+core secondari.
