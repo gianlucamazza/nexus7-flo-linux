@@ -353,3 +353,11 @@ Ricerca del 2026-11-15 (sera), punti utili:
 - **Pannello JDI**: SET_DISPLAY_OFF/ENTER_SLEEP_MODE vanno spostati da
   `.unprepare` a `.disable` (flusso video ancora attivo); la luminosità (0x51)
   va scritta in `jdi_panel_init()`.
+
+r12 (2026-11-15, 18:48): solo cache L2 a 648 MHz (patch 0014). Avvia
+regolarmente; `krait_l2_pri_mux` a 648 MHz. 7-Zip a un thread, 1512 MHz,
+dizionario 4 MB: compressione 499 → 555 MIPS (+11%), decompressione
+1140 → 1166 (+2%). Il limite di ricarica scritto a mano (0x01=0x44) è
+sopravvissuto al riavvio. Mesa 26.3.0 non è ancora pubblicata per armv7 in
+Alpine edge (solo aarch64 e x86_64; armv7 fermo a 26.2.6), quindi la prova
+GTK4 con GPU è rimandata o va fatta con `FD_MESA_DEBUG=nobin,flush`.
