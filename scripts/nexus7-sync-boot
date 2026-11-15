@@ -1,0 +1,40 @@
+#!/bin/sh
+# flo boots from GPT p22, while /boot is an inner userdata partition.
+set -eu
+[ "$(id -u)" = 0 ]
+exec 9>/run/nexus7-boot-sync.lock
+flock -x 9
+src=/boot
+dst=/mnt/lk2nd-boot
+[ "$(blkid -s UUID -o value /dev/mmcblk0p22)" = dd08f7d7-90a7-4d15-86bd-915c1d02d7c4 ]
+mountpoint -q "$src"
+for item in vmlinuz initramfs qcom-apq8064-asus-nexus7-flo.dtb extlinux/extlinux.conf; do
+    test -s "$src/$item"
+done
+grep -q 'firmware_class.path=/lib/firmware/postmarketos' "$src/extlinux/extlinux.conf"
+mkdir -p "$dst"
+mounted_here=false
+if ! mountpoint -q "$dst"; then
+    mount -t ext4 /dev/mmcblk0p22 "$dst"
+    mounted_here=true
+fi
+cleanup() { if "$mounted_here"; then umount "$dst"; fi; }
+trap cleanup EXIT
+changed=false
+for item in vmlinuz initramfs qcom-apq8064-asus-nexus7-flo.dtb extlinux/extlinux.conf; do
+    cmp -s "$src/$item" "$dst/$item" || changed=true
+done
+if ! "$changed"; then exit 0; fi
+# Stage and compare the complete set before replacing any live file.
+for item in vmlinuz initramfs qcom-apq8064-asus-nexus7-flo.dtb extlinux/extlinux.conf; do
+    mkdir -p "$dst/$(dirname "$item")"
+    cp "$src/$item" "$dst/$item.new"
+    cmp "$src/$item" "$dst/$item.new"
+done
+sync
+for item in vmlinuz initramfs qcom-apq8064-asus-nexus7-flo.dtb extlinux/extlinux.conf; do
+    if [ -f "$dst/$item" ]; then cp -p "$dst/$item" "$dst/$item.previous"; fi
+    mv "$dst/$item.new" "$dst/$item"
+done
+sync
+printf 'Nexus 7: Linux boot files synchronized to lk2nd partition.\n'
