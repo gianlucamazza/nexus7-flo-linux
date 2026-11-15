@@ -270,6 +270,20 @@ Il tablet gira su r11 con quattro core. Riga di comando locale:
   `~/nexus7-recovery-20261114/candidate-l2-648mhz.patch`, non provata.
 - **USB**: dopo molti collegamenti la porta del portatile ha dato di nuovo
   `error -71` in recovery; si è risolto ricollegando.
+- **Blocco all'avvio di r11 con `performance`**: con
+  `cpufreq.default_governor=performance` (tutti i core fissi a 1512 MHz) r11 si
+  è bloccato circa 50 s dopo la comparsa della rete USB in 5 avvii su 5 senza
+  servizio (13:48 ×2, 14:23, 14:24 e uno successivo), più quello delle 14:13 con
+  il servizio. Con `schedutil` da riga di comando e servizio mascherato l'avvio
+  delle 16:38 è riuscito ed è rimasto stabile (45–58 °C, frequenze che
+  scalano). I due avvii riusciti in precedenza (13:36, 14:06) erano quelli in
+  cui il servizio passava a `schedutil` entro ~40 s. Ipotesi non dimostrata:
+  core a 1512 MHz con la L2 ferma a 384 MHz.
+  Stato attuale: `schedutil` in `90-nexus7-local.conf` e su p22
+  (`extlinux.conf.before-schedutil` è la copia precedente); servizio
+  `nexus7-thermal-governor` disabilitato (il freno termico è nel kernel) e
+  ripulito dal blocco che riscriveva la luminosità. `/boot` non è stato
+  rigenerato: p22 contiene ancora `systemd.mask=`, innocuo.
 
 Ricerca del 2026-11-15: nessun albero ha cpufreq o cooling map per APQ8064;
 il display del flo risulta non funzionante sul 7.2 in postmarketOS; la serie
