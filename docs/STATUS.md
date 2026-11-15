@@ -304,7 +304,7 @@ Il tablet gira su r11 con quattro core. Riga di comando locale:
   all'utente `tablet` (probabilmente per le sessioni SSH aperte, che fanno
   scattare le azioni `*-multiple-sessions`). Aggiunta
   `/etc/polkit-1/rules.d/40-nexus7-power.rules` (copia in `config/`); ora
-  risponde `yes`. Da confermare dal menu.
+  risponde `yes`; pulsanti attivi, confermato dall'utente.
 - **Ricarica**: con schermo acceso e cavo al portatile la batteria perde
   150–290 mA; a schermo spento guadagna ~137 mA. Da misurare con un
   alimentatore da muro prima di toccare il device tree.
