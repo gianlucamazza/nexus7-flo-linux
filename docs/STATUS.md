@@ -308,6 +308,24 @@ Il tablet gira su r11 con quattro core. Riga di comando locale:
 - **Ricarica**: con schermo acceso e cavo al portatile la batteria perde
   150–290 mA; a schermo spento guadagna ~137 mA. Da misurare con un
   alimentatore da muro prima di toccare il device tree.
+- **Touch misurato (18:27)**: 753 interrupt per 753 frame, eventi ogni 10 ms
+  (~100 Hz), nessuna coda. Il lag non è nell'ingresso ma nel disegno via
+  software. `cpu.uclamp.min=60` sui cgroup dell'utente (prova a caldo) non ha
+  dato un miglioramento percepito.
+- **Ricarica, causa trovata**: registro 0x01 del SMB345 = 0x41, cioè limite
+  d'ingresso USB a 500 mA (codice 1); APSD attivo (0x04=0x0e), controllo a pin
+  (0x06=0x70). Scrivendo a mano la sequenza del kernel originale per i
+  caricatori da muro (0x30=0x80; 0x02 senza AICL; 0x01=0x44; AICL di nuovo
+  attivo) la batteria passa da −238 mA a +550 mA a schermo acceso e AICL
+  si completa (0x3f=0x94). Dump in `~/nexus7-recovery-20261114/smb345-*.txt`.
+  Da rendere permanente con `summit,usb-current-limit-microamp = <1500000>`
+  (codice 4 nella tabella smb345 del driver). Attenzione: senza rilevamento
+  del tipo di cavo il limite vale anche sulle porte dei computer.
+- **Trappola della sincronizzazione**: qualunque `apk add` fa scattare la
+  copia di `/boot` su p22. Dopo aver cambiato `90-nexus7-local.conf` va
+  sempre eseguito `mkinitfs`, altrimenti p22 riceve la vecchia riga di comando
+  (alle 18:38 era tornato `performance`; corretto alle 18:40).
+- **r12 in compilazione**: solo cache L2 a 648 MHz (patch 0014).
 
 Ricerca del 2026-11-15: nessun albero ha cpufreq o cooling map per APQ8064;
 il display del flo risulta non funzionante sul 7.2 in postmarketOS; la serie
