@@ -287,6 +287,27 @@ Il tablet gira su r11 con quattro core. Riga di comando locale:
   Riavvio di conferma alle 16:50: secondo avvio riuscito con `schedutil`,
   stabile oltre i 200 s (50–64 °C). Sul tablet restano solo i backup e i
   pacchetti di r9 e r11 (rimossi quelli da r2 a r8, ~0,8 GB).
+- **Episodio delle 17:12 (non un blocco)**: il tablet è sparito dalla USB con
+  `error -71` sul portatile mentre leggevo i registri del caricatore da
+  debugfs. Lo avevo dato per bloccato senza provare il Wi-Fi; l'utente ha
+  confermato che era attivo. Era la solita caduta USB. Regola: prima di
+  parlare di blocco, provare `<tablet-wifi-address>` e chiedere cosa mostra lo schermo.
+- **Osservazione di r11 (17:28–18:21)**: 53 minuti con `schedutil`, un
+  campione ogni 30 s, nessuna risposta mancata, massimo 68 °C; schermo spento
+  per inattività per oltre 30 minuti e riacceso senza errori. Log in
+  `~/nexus7-recovery-20261114/r11-soak-1728.log`.
+- **Spegnimento del pannello**: allo spegnimento dello schermo per inattività
+  i comandi DCS vanno in timeout (`SET_DISPLAY_OFF failed: -110`,
+  `ENTER_SLEEP_MODE failed: -110`). Nessun effetto visibile; da guardare con
+  la luminosità all'avvio.
+- **Spegni/Riavvia disattivati in Phosh**: logind rispondeva `challenge`
+  all'utente `tablet` (probabilmente per le sessioni SSH aperte, che fanno
+  scattare le azioni `*-multiple-sessions`). Aggiunta
+  `/etc/polkit-1/rules.d/40-nexus7-power.rules` (copia in `config/`); ora
+  risponde `yes`. Da confermare dal menu.
+- **Ricarica**: con schermo acceso e cavo al portatile la batteria perde
+  150–290 mA; a schermo spento guadagna ~137 mA. Da misurare con un
+  alimentatore da muro prima di toccare il device tree.
 
 Ricerca del 2026-11-15: nessun albero ha cpufreq o cooling map per APQ8064;
 il display del flo risulta non funzionante sul 7.2 in postmarketOS; la serie
