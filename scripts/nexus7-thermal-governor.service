@@ -1,0 +1,13 @@
+[Unit]
+Description=Nexus 7 CPU voltage init and thermal frequency cap
+DefaultDependencies=no
+After=sysinit.target
+ConditionPathExists=/sys/devices/system/cpu/cpufreq/policy0
+
+[Service]
+ExecStart=/usr/local/sbin/nexus7-thermal-governor
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=basic.target

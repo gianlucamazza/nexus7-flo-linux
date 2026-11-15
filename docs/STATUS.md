@@ -209,3 +209,29 @@ Aperti: riaccensione dei core dopo hotplug (`failed to come online`), rete USB
 sparita per un avvio intero, `hal_start_scan err=5`, patch 0004 non isolata,
 fotocamere non supportate. Nulla è committato; copia delle patch in
 `~/nexus7-recovery-20261114/patches-r9-snapshot/`.
+
+## Kernel r9: regolazione di frequenza validata — 2026-11-15
+
+Il tablet gira su r9 con quattro core, `cpuidle.off=1` e
+`cpufreq.default_governor=powersave`.
+
+- Tutti i 12 OPP da 384 a 1512 MHz provati a mano su ciascuno dei quattro core
+  (`scripts/cpufreq-step-test.sh`): stabili, tensioni da 875 a 987,5 mV (PVS 6).
+- Prima di r9 il core 0 girava a 918 MHz e i secondari a 384 MHz, tutti a
+  1,3 V: è il valore che il driver SPM imposta all'avvio. Un core che parte già
+  alla frequenza minima resta a 1,3 V finché non cambia frequenza una volta.
+- Un secondo spegnimento termico (11:09) è avvenuto avviando quattro core con il
+  governor `userspace`, cioè senza che nessuno abbassasse la tensione.
+- Quattro core a pieno carico a 1512 MHz arrivano a 98 °C in 44 s. Il device
+  tree non ha cooling map per la CPU, quindi il kernel non rallenta da solo.
+- `scripts/nexus7-thermal-governor` (servizio systemd, installato in
+  `/usr/local/sbin`) forza una transizione per core all'avvio, attiva
+  `schedutil` e limita `scaling_max_freq` in base alla temperatura. Con il
+  servizio, due minuti a pieno carico restano a 80–86 °C intorno a 1026 MHz.
+- A riposo: 68% del tempo a 384 MHz, core a 52–61 °C, batteria −78 mA a
+  luminosità 40 con il cavo del portatile.
+
+Da fare nel kernel al posto del servizio: cooling map e `#cooling-cells` per la
+CPU nel device tree dell'APQ8064, e tensione iniziale coerente con l'OPP di
+avvio. Il sensore di `cpu0-thermal` resta fermo allo stesso valore per tutto
+un avvio: da verificare.
