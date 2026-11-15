@@ -1,0 +1,92 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: USB host mode through the ID pin and SMB345 boost
+
+Risk: HIGH RISK. Makes the charger push 5 V out of the micro-USB port from
+the battery whenever the ID pin reads low. Requires 0001 (otherwise the SoC
+itself drives the ID pin low and the boost would be on permanently) and
+applies on top of 0004. Needs CONFIG_EXTCON_USB_GPIO. Untested; device-mode
+behaviour changes too, because the controller now takes cable state from the
+extcon instead of the PHY.
+
+Vendor data:
+  - drivers/usb/otg/msm_otg.c: APQ_OTG_ID_PIN 77; id_pin_irq_work_function():
+    low = host, high = leave host, ignored while SlimPort is connected.
+  - board-flo.c, msm_otg_pdata: mode = USB_OTG, power_budget = 750,
+    pmic_id_irq commented out (the PMIC ID comparator is not used).
+  - msm_otg.c msm_otg_start_host() -> smb345_otg_status(true);
+    drivers/power/smb345-charger.c smb345_configure_otg(): 250 mA limit,
+    command register OTG enable bit, then 750 mA.
+
+Open point: the vendor driver also rewrites the SMB345 "OTG control" field
+(I2C control at init, pin control after enabling). The mainline smb347 driver
+only sets the OTG enable command bit; if the chip is strapped for pin
+control VBUS will simply not appear.
+---
+ .../boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 27 ++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index bad8c82..e191dbf 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -79,6 +79,14 @@
+ 		pinctrl-0 = <&spk_en_state>, <&hp_det_state>;
+ 	};
+ 
++	/* Micro-USB ID pin: low with an OTG (host) adapter plugged in. */
++	usb_id: usb-id {
++		compatible = "linux,extcon-usb-gpio";
++		id-gpios = <&tlmm_pinmux 77 GPIO_ACTIVE_HIGH>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&usb_id_pin>;
++	};
++
+ 	soc {
+ 		sram@2a03f000 {
+ 			compatible = "qcom,apq8064-imem", "syscon", "simple-mfd";
+@@ -178,6 +186,15 @@
+ 		summit,enable-usb-charging;
+ 
+ 		monitored-battery = <&battery>;
++
++		/* 5 V boost onto VBUS for host mode, 750 mA as in the vendor kernel. */
++		otg_vbus: usb-vbus {
++			regulator-name = "usb_vbus";
++			regulator-min-microvolt = <5000000>;
++			regulator-max-microvolt = <5000000>;
++			regulator-min-microamp = <750000>;
++			regulator-max-microamp = <750000>;
++		};
+ 	};
+ };
+ 
+@@ -441,6 +458,7 @@
+ };
+ 
+ &usb_hs1_phy {
++	extcon = <&usb_id>;
+ 	v3p3-supply = <&pm8921_l3>;
+ 	v1p8-supply = <&pm8921_l4>;
+ };
+@@ -448,6 +466,8 @@
+ /* OTG */
+ &usb1 {
+ 	dr_mode = "otg";
++	extcon = <&usb_id>, <&usb_id>;
++	vbus-supply = <&otg_vbus>;
+ 	status = "okay";
+ };
+ 
+@@ -521,6 +541,13 @@
+ };
+ 
+ &tlmm_pinmux {
++	usb_id_pin: usb-id-state {
++		pins = "gpio77";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
+ 	cdc_mclk_state: cdc-mclk-state {
+ 		pins = "gpio39";
+ 		function = "codec_spkr_i2s";

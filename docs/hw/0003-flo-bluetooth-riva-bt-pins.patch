@@ -1,0 +1,36 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: mux the WCN3660 Bluetooth pins
+
+Risk: LOW. Needs CONFIG_BT_QCOMSMD (see CONFIG-CHANGES.txt).
+
+The "qcom,wcnss-bt" node already exists in qcom-apq8064.dtsi and is enabled
+with riva; the vendor kernel uses the same transport (flo_defconfig:
+CONFIG_BT_HCISMD=y; device/asus/flo ueventd.flo.rc: /dev/smd2, /dev/smd3 owned
+by bluetooth). Add the riva_bt pin function on GPIO 16/17 as the mako and
+yuga boards do.
+
+Not verified from flo sources: the vendor gpiomux tables do not list GPIO
+16/17 at all (function 1 = riva_bt is presumably left as set by the
+bootloader), so this hunk follows the sibling boards rather than flo data.
+The controller has no address until one is set ("btmgmt public-addr" or a
+local-bd-address property).
+---
+ arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index 1ed6d67..4ca46ed 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -409,10 +409,10 @@
+ 	};
+ };
+ 
+-/* Qualcomm WCN3660 Wi-Fi. */
++/* Qualcomm WCN3660 Wi-Fi and Bluetooth (HCI over SMD). */
+ &riva {
+ 	pinctrl-names = "default";
+-	pinctrl-0 = <&riva_wlan_pin_a>;
++	pinctrl-0 = <&riva_wlan_pin_a>, <&riva_bt_pin_a>;
+ 	vddcx-supply = <&pm8921_s3>;
+ 	vddmx-supply = <&pm8921_l24>;
+ 	vddpx-supply = <&pm8921_s4>;

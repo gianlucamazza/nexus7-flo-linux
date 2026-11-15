@@ -1,0 +1,43 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: give the XOADC its L14 reference
+
+Risk: HIGH RISK by policy (defines a new PMIC regulator and its voltage).
+Optional: CONFIG_QCOM_PM8XXX_XOADC and CONFIG_SENSORS_IIO_HWMON bind without
+it (the driver falls back to a dummy regulator).
+
+Vendor data: board-flo-regulator.c, RPM_LDO(L14, 0, 1, 0, 1800000, 1800000,
+NULL, 0, 0) and REGULATOR_SUPPLY("vreg_xoadc", "pm8921-charger") under
+VREG_CONSUMERS(L14); board-flo-pmic.c, apq8064_pm8921_adc_data:
+adc_vdd_reference = 1800 mV. The yuga board defines L14 the same way.
+---
+ arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index a5819b7..bad8c82 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -377,6 +377,13 @@
+ 			regulator-always-on;
+ 		};
+ 
++		/* XOADC reference (vendor "vreg_xoadc") */
++		pm8921_l14: l14 {
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
++			bias-pull-down;
++		};
++
+ 		/* pwm_power for backlight */
+ 		pm8921_l17: l17 {
+ 			regulator-min-microvolt = <3000000>;
+@@ -444,6 +451,10 @@
+ 	status = "okay";
+ };
+ 
++&pm8921_xoadc {
++	xoadc-ref-supply = <&pm8921_l14>;
++};
++
+ &pm8921_gpio {
+ 	cdc_reset_state: cdc-reset-state {
+ 		pins = "gpio34";

@@ -1,0 +1,39 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: keep LVS4 and L25 on as the vendor kernel does
+
+Risk: HIGH RISK by policy (always-on rails; small standby current cost).
+Speculative as a sensor fix: no vendor consumer names LVS4.
+
+board-flo-regulator.c, apq8064_rpm_regulator_init_data[]:
+  RPM_VS(LVS4, 1, 1, 0, "8921_s4")                      (a_on = 1)
+  RPM_LDO(L25, 1, 1, 0, 1250000, 1250000, "8921_s1", ...) (a_on = 1)
+This board file defines both without regulator-always-on, so the regulator
+core switches them off at late init when nothing claims them. LVS4 is a
+1.8 V switch from S4 with no named consumer in the vendor tables, which makes
+it a candidate I/O rail for the DSPS-managed sensors; L25 is the codec
+1.25 V core. The voltages are unchanged.
+---
+ arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index 9ed62a9..38917f2 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -436,14 +436,17 @@
+ 			regulator-min-microvolt = <1250000>;
+ 			regulator-max-microvolt = <1250000>;
+ 			bias-pull-down;
++			regulator-always-on;
+ 		};
+ 
+ 		pm8921_lvs1: lvs1 {
+ 			bias-pull-down;
+ 		};
+ 
++		/* Always on in the vendor kernel; no consumer is named there. */
+ 		pm8921_lvs4: lvs4 {
+ 			bias-pull-down;
++			regulator-always-on;
+ 		};
+ 
+ 		pm8921_lvs5: lvs5 {

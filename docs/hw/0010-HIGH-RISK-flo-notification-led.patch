@@ -1,0 +1,50 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: add the notification LED
+
+Risk: HIGH RISK. The mainline driver has no current limit: brightness 0..31
+is written straight into the 5-bit current field, while the vendor kernel
+never goes above level 2 (4 mA). Writing a large brightness may overdrive
+the LED. Prefer adding a "qcom,pm8921-led" compatible with a current cap to
+leds-pm8058 before using this.
+
+Vendor data: board-flo-pmic.c, pm8921_led_info[] ("white") and
+pm8921_led_configs[]: PM8XXX_ID_LED_1, PM8XXX_LED_MODE_PWM2, max_current =
+PM8921_LC_LED_MAX_CURRENT (4 mA), pwm_channel 5. drivers/leds/leds-pm8xxx.c:
+SSBI_REG_ADDR_LED_CTRL_BASE 0x131 + PM8XXX_LED_OFFSET(id) -> 0x132, current
+field mask 0xf8 shift 3, same layout as the PM8058 "common" LED handled by
+leds-pm8058 (CONFIG_LEDS_PM8058=y already). The vendor blink pattern through
+LPG channel 5 is not reproduced; this gives a static on/off LED only.
+---
+ arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index e191dbf..9ed62a9 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/input.h>
++#include <dt-bindings/leds/common.h>
+ #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+ #include <dt-bindings/power/summit,smb347-charger.h>
+ 
+@@ -270,6 +271,18 @@
+ 
+ &pm8921 {
+ 	interrupts-extended = <&tlmm_pinmux 74 IRQ_TYPE_LEVEL_LOW>;
++
++	/*
++	 * Notification LED on low-current driver 1. The vendor kernel limits
++	 * it to 4 mA (level 2); this driver accepts levels up to 31.
++	 */
++	led@132 {
++		compatible = "qcom,pm8058-led";
++		reg = <0x132>;
++		color = <LED_COLOR_ID_WHITE>;
++		function = LED_FUNCTION_STATUS;
++		default-state = "off";
++	};
+ };
+ 
+ &rpm {

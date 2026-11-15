@@ -1,0 +1,158 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: add the WCD9310 codec and sound card
+
+Risk: MEDIUM (drives the speaker amplifier enable; no regulator is changed:
+S4 and L25 are already defined at the vendor voltages).
+Needs CONFIG_SLIMBUS, CONFIG_SLIM_QCOM_CTRL, CONFIG_SND_SOC_APQ8064_TABLA.
+Applies on top of 0004 (uses the &tlmm_pinmux block added there).
+
+Expected result: a sound card with working headphone output and jack
+detection. The built-in speakers will stay silent, capture is absent.
+
+Vendor data:
+  - board-flo.c, apq8064_tabla20_platform_data / apq8064_slim_tabla20:
+    SLIMbus e_addr {0, 1, 0x60, 0, 0x17, 2} (PGD) and {0, 0, 0x60, 0, 0x17, 2}
+    (interface), reset on PM8921 GPIO 34, IRQ on TLMM GPIO 42 (unused here).
+    board-flo.c registers both the 1.x (product 0x10) and 2.x (0x60)
+    devices; "slim217,60" assumes the 2.x codec, which the vendor source
+    cannot confirm for a given unit.
+  - board-flo-pmic.c, pm8921_gpios[]: PM8921_GPIO_OUTPUT(34, 0, MED),
+    "TABLA CODEC RESET".
+  - board-flo-regulator.c: CDC_VDD_CP, CDC_VDDA_RX, CDC_VDDA_TX, VDDIO_CDC on
+    8921_s4 (1.8 V); VDDD_CDC_D, CDC_VDDA_A_1P2V on 8921_l25 (1.25 V).
+  - board-flo-gpiomux.c: slimbus clk/data on GPIO 40/41, cdc_mclk on GPIO 39
+    function 1; headphone detect GPIO 45, hook GPIO 62, debug board GPIO 85.
+  - sound/soc/msm/asustek_headset.c: JACK_GPIO 45, inserted when low.
+  - sound/soc/msm/apq8064.c: bottom_spk_pamp_gpio = PM8921 GPIO 18 for
+    "Ext Spk Bottom Pos/Neg" = LINEOUT1/LINEOUT3; device/asus/flo
+    mixer_paths.xml "speaker" path feeds RX3 and RX4 (LINEOUT1 and, on the
+    2.x codec, LINEOUT3 through "RX4 DSM MUX" = CIC_OUT).
+
+The mainline wcd9310 driver only implements RX1/RX2 (EAR, HPHL/HPHR) and
+RX5/RX6 (LINEOUT2/LINEOUT4), and apq8064-tabla routes "Speaker" to
+LINEOUT2/4. speaker-en-gpios is mandatory in the binding and is pointed at
+the real amplifier enable, so selecting "Speaker" turns the amplifier on with
+nothing driving it. Speaker output needs LINEOUT1/LINEOUT3 support in the
+codec and matching routes in the machine driver.
+---
+ .../boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 93 ++++++++++++++++++++++
+ 1 file changed, 93 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index 0d86b28..884d35b 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -63,6 +63,22 @@
+ 		};
+ 	};
+ 
++	/*
++	 * WCD9310 on the Apps-managed SLIMbus. The codec driver only has the
++	 * headphone, earpiece and LINEOUT2/4 paths; the speakers of this board
++	 * hang off LINEOUT1 and LINEOUT3 behind the amplifier enabled by
++	 * PM8921 GPIO 18, so only the headphone output is expected to work.
++	 */
++	sound {
++		compatible = "qcom,apq8064-tabla-snd-card";
++		model = "apq8064-tabla";
++		codec = <&tabla_codec>;
++		speaker-en-gpios = <&pm8921_gpio 18 GPIO_ACTIVE_HIGH>;
++		hp-det-gpios = <&tlmm_pinmux 45 GPIO_ACTIVE_LOW>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&spk_en_state>, <&hp_det_state>;
++	};
++
+ 	soc {
+ 		sram@2a03f000 {
+ 			compatible = "qcom,apq8064-imem", "syscon", "simple-mfd";
+@@ -412,6 +428,26 @@
+ };
+ 
+ &pm8921_gpio {
++	cdc_reset_state: cdc-reset-state {
++		pins = "gpio34";
++		function = PMIC_GPIO_FUNC_NORMAL;
++		power-source = <PM8921_GPIO_S4>;
++		qcom,drive-strength = <PMIC_GPIO_STRENGTH_MED>;
++		drive-push-pull;
++		bias-disable;
++		output-low;
++	};
++
++	spk_en_state: spk-en-state {
++		pins = "gpio18";
++		function = PMIC_GPIO_FUNC_NORMAL;
++		power-source = <PM8921_GPIO_S4>;
++		qcom,drive-strength = <PMIC_GPIO_STRENGTH_MED>;
++		drive-push-pull;
++		bias-disable;
++		output-low;
++	};
++
+ 	volume_keys_pin_a: volume-keys-active {
+ 		pins = "gpio4", "gpio38";
+ 		function = "normal";
+@@ -420,7 +456,64 @@
+ 	};
+ };
+ 
++&slimbam {
++	status = "okay";
++};
++
++&slimbus {
++	pinctrl-names = "default";
++	pinctrl-0 = <&slimbus_default_state>;
++	status = "okay";
++
++	tabla_ifd: codec@0,0 {
++		compatible = "slim217,60";
++		reg = <0 0>;
++	};
++
++	tabla_codec: codec@1,0 {
++		compatible = "slim217,60";
++		reg = <1 0>;
++
++		clocks = <&lcc CODEC_I2S_SPKR_OSR_CLK>;
++		clock-names = "mclk";
++		pinctrl-names = "default";
++		pinctrl-0 = <&cdc_mclk_state>, <&cdc_reset_state>;
++
++		reset-gpios = <&pm8921_gpio 34 GPIO_ACTIVE_LOW>;
++		slim-ifc-dev = <&tabla_ifd>;
++		#sound-dai-cells = <0>;
++
++		cdc-vdd-cp-supply = <&pm8921_s4>;
++		cdc-vdda-rx-supply = <&pm8921_s4>;
++		cdc-vdda-tx-supply = <&pm8921_s4>;
++		vddio-cdc-supply = <&pm8921_s4>;
++		vddd-cdc-d-supply = <&pm8921_l25>;
++		cdc-vdda-a-1p2v-supply = <&pm8921_l25>;
++	};
++};
++
+ &tlmm_pinmux {
++	cdc_mclk_state: cdc-mclk-state {
++		pins = "gpio39";
++		function = "codec_spkr_i2s";
++		drive-strength = <8>;
++		bias-disable;
++	};
++
++	hp_det_state: hp-det-state {
++		pins = "gpio45";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++	};
++
++	slimbus_default_state: slimbus-default-state {
++		pins = "gpio40", "gpio41";
++		function = "slimbus";
++		drive-strength = <8>;
++		bias-bus-hold;
++	};
++
+ 	hall_sensor_pin: hall-sensor-state {
+ 		pins = "gpio36";
+ 		function = "gpio";

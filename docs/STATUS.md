@@ -361,3 +361,33 @@ dizionario 4 MB: compressione 499 → 555 MIPS (+11%), decompressione
 sopravvissuto al riavvio. Mesa 26.3.0 non è ancora pubblicata per armv7 in
 Alpine edge (solo aarch64 e x86_64; armv7 fermo a 26.2.6), quindi la prova
 GTK4 con GPU è rimandata o va fatta con `FD_MESA_DEBUG=nobin,flush`.
+
+r13 (2026-11-15, 21:42): cache L2 a 1134 MHz **e** `CONFIG_HZ=300`. Si blocca
+a metà avvio (animazione di caricamento; la rete USB dell'initramfs compare e
+poi smette di rispondere), due volte su due. Con il DTB di r12 e il kernel r13
+si blocca lo stesso, quindi non è la cache L2. Ripristinato r12 da TWRP con i
+file `.previous` di p22.
+
+r14 (2026-11-15, 22:53): come r12 più la sola cache L2 a 1134 MHz (S3 e L24 a
+1,15 V sempre accesi), `CONFIG_HZ=100`, stesso ambiente di compilazione di
+r13. Avvia regolarmente: il blocco di r13 dipende quindi da `CONFIG_HZ=300`
+(causa non cercata; non riproporlo senza console seriale). 7-Zip a un thread:
+compressione 555 → 573 MIPS, decompressione invariata (1167); a 4 thread
+2080/3649 MIPS, temperature fino a 77 °C sotto carico.
+
+Altre misure della sera:
+- Il limite d'ingresso SMB345 torna a 500 mA (0x01=0x41) a ogni riavvio o
+  ricollegamento: la scrittura a mano non è permanente, serve la proprietà DT.
+- `gnome-control-center` lasciato aperto ha usato in media il 40% di un core
+  per 80 minuti, anche a schermo spento. `fwupd` mascherato.
+- phoc usa GLES sulla GPU; Phosh, squeekboard e le app sono disegnati dalla CPU.
+- Hardware non integrato: audio, Bluetooth (manca `CONFIG_BT_QCOMSMD`),
+  sensori, sensore custodia, LED, ADC del PMIC. Matrice e bozze di patch da
+  verificare in `docs/hw/`; i sensori passano dal firmware DSPS e
+  non sono descrivibili dal kernel originale.
+- pmbootstrap: `crossdirect` 5.3.1 non regge il test del preprocessore di
+  Meson 1.12 (`-cpp` scambiato per `-c`, e `argv[0]` nel ripiego su qemu);
+  corretto in locale in `cross/crossdirect` (pkgrel 2). Mesa 26.3.0 e
+  `venus-protocol` copiati da Alpine in `temp/`.
+
+Progetto shell separato: `../flo-shell`.

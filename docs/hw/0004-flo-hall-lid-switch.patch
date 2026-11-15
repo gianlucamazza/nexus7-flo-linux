@@ -1,0 +1,62 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: add the hall-effect lid switch
+
+Risk: LOW for hardware, MEDIUM for usability: if the polarity were wrong the
+desktop would see a closed lid and suspend. Check with evtest before letting
+logind act on it.
+
+Vendor data (drivers/input/lid.c): hall_sensor_gpio = 36, both-edge IRQ,
+wake-up capable, 50 ms settle time, input_report_switch(SW_LID, !value), so
+the line is low when the cover is closed. board-flo-gpiomux.c,
+asustek_hall_sensor_cfg: GPIO function, 2 mA, pull-up. board-flo.c,
+asustek_add_lid(): the sensor is powered from 8921_l17 at 3.0 V on hardware
+revisions C/D/E; L17 is already always-on at 3.0 V in this board file.
+---
+ .../boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts  | 21 ++++++++++++++++++++-
+ 1 file changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index 4ca46ed..7712851 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -39,7 +39,7 @@
+ 	gpio-keys {
+ 		compatible = "gpio-keys";
+ 		pinctrl-names = "default";
+-		pinctrl-0 = <&volume_keys_pin_a>;
++		pinctrl-0 = <&volume_keys_pin_a>, <&hall_sensor_pin>;
+ 
+ 		key-volume-up {
+ 			label = "Volume Up";
+@@ -51,6 +51,16 @@
+ 			gpios = <&pm8921_gpio 38 GPIO_ACTIVE_LOW>;
+ 			linux,code = <KEY_VOLUMEDOWN>;
+ 		};
++
++		/* Hall sensor, powered from L17; low when the cover is shut. */
++		switch-lid {
++			label = "Lid";
++			gpios = <&tlmm_pinmux 36 GPIO_ACTIVE_LOW>;
++			linux,input-type = <EV_SW>;
++			linux,code = <SW_LID>;
++			debounce-interval = <50>;
++			wakeup-source;
++		};
+ 	};
+ 
+ 	soc {
+@@ -409,6 +419,15 @@
+ 	};
+ };
+ 
++&tlmm_pinmux {
++	hall_sensor_pin: hall-sensor-state {
++		pins = "gpio36";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-pull-up;
++	};
++};
++
+ /* Qualcomm WCN3660 Wi-Fi and Bluetooth (HCI over SMD). */
+ &riva {
+ 	pinctrl-names = "default";

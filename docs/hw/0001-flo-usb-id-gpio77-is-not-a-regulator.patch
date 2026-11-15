@@ -1,0 +1,42 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: gpio77 is the USB ID input, not a regulator enable
+
+Risk: LOW. Prerequisite for the USB host patch (0009).
+
+The board file inherited an "ext_3p3v" fixed regulator on TLMM GPIO 77 from
+the APQ8064 reference boards. On flo that pin is the micro-USB ID input:
+  - board-flo-gpiomux.c, msm8064_sp_gpio_config[]: ".gpio = 77, /* APQ_USB_ID */",
+    configured GPIOMUX_FUNC_GPIO, GPIOMUX_IN, no pull;
+  - drivers/usb/otg/msm_otg.c: "#define APQ_OTG_ID_PIN 77",
+    id_pin_irq_work_function() (low = host mode);
+  - board-flo.c: "&apq8064_device_ext_3p3v_vreg" is commented out of the
+    device lists and board-flo-gpiomux.c comments out
+    apq8064_ext_regulator_configs.
+The regulator has no consumer and is only "regulator-boot-on", so the
+regulator core switches it off at late init and the SoC then drives the ID
+line low as an output. Drop the node.
+---
+ arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 11 -----------
+ 1 file changed, 11 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index c0d6c7e..e9ea0c9 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -36,17 +36,6 @@
+ 		};
+ 	};
+ 
+-	ext_3p3v: regulator-ext-3p3v {
+-		compatible = "regulator-fixed";
+-		regulator-min-microvolt = <3300000>;
+-		regulator-max-microvolt = <3300000>;
+-		regulator-name = "ext_3p3v";
+-		startup-delay-us = <0>;
+-		gpio = <&tlmm_pinmux 77 GPIO_ACTIVE_HIGH>;
+-		enable-active-high;
+-		regulator-boot-on;
+-	};
+-
+ 	gpio-keys {
+ 		compatible = "gpio-keys";
+ 		pinctrl-names = "default";

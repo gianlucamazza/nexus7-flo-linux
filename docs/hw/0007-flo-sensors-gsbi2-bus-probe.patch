@@ -1,0 +1,55 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: enable GSBI2 I2C to look for the sensors
+
+Risk: LOW-MEDIUM, EXPERIMENTAL. The bus assignment is an inference, not a
+vendor fact. Do not upstream.
+
+The vendor kernel has no board data for the accelerometer/gyroscope, compass
+or light sensor: board-flo.c only registers the DSPS core
+(apq8064_init_dsps(), "msm_dsps", PIL image "dsps") and Android talks to it
+through sensors.qcom (device/asus/flo init.flo.rc, proprietary-blobs.txt:
+dsps.mdt/.b00-.b05, sensors.msm8960.so). Chip models, addresses, interrupt
+lines and mounting matrices are therefore not available from source.
+
+Why GSBI2: the vendor flo kernel registers I2C only on GSBI1 (charger, fuel
+gauge, NFC, SlimPort), GSBI3 (touch) and GSBI4 (cameras) (board-flo.c,
+apq8064_device_qup_i2c_gsbi1/3/4 in common_not_mpq_devices[], register_i2c_devices()). It never registers or muxes
+the controller at 0x12480000 that qcom-apq8064.dtsi calls GSBI2 (GPIO 24/25);
+the pins of the remaining GSBIs are taken on flo (GSBI5: GPIO 51/53 are PCB-ID
+straps and 54 is the panel reset; GSBI6: GPIO 14 PCB-ID, 16/17 Bluetooth;
+GSBI7: debug UART). That leaves GSBI2 as the only free I2C-capable bus for
+the DSPS-owned sensors. This patch only turns the controller on so the bus
+can be scanned (i2cdetect -r) while DSPS is not running. No sensor nodes are
+added. If nothing answers, the sensor rails are probably off (see 0011) or
+the inference is wrong.
+---
+ arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index 884d35b..a5819b7 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -181,6 +181,23 @@
+ 	};
+ };
+ 
++/*
++ * Probe aid only. The vendor kernel never touches the motion, compass and
++ * light sensors: they sit behind the DSPS sensor core and its firmware, so
++ * neither the bus nor the chips are named in the board files. GSBI2 is the
++ * controller inside the sensor subsystem address range; enable it with no
++ * child devices so the bus can be scanned from user space.
++ */
++&gsbi2 {
++	qcom,mode = <GSBI_PROT_I2C>;
++	status = "okay";
++};
++
++&gsbi2_i2c {
++	clock-frequency = <100000>;
++	status = "okay";
++};
++
+ &gsbi3 {
+ 	qcom,mode = <GSBI_PROT_I2C>;
+ 	status = "okay";

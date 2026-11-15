@@ -1,0 +1,52 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: do not offer the SPC idle state
+
+Risk: LOW (gives the same runtime state as today's cpuidle.off=1).
+
+"failed to register cpuidle driver" (x4) is printed by cpuidle_register()
+because the kernel is booted with cpuidle.off=1: __cpuidle_register_driver()
+returns -ENODEV when cpuidle_disabled() (drivers/cpuidle/driver.c), once per
+CPU since cpuidle-qcom-spm registers one driver per CPU. The parameter is
+there because entering "qcom,idle-state-spc" hangs this board.
+
+Removing cpu-idle-states makes dt_init_idle_driver() return 0 in
+spm_cpuidle_register(), which then returns -ENODEV silently: no cpuidle
+driver, CPUs idle in WFI, no error messages, and cpuidle.off=1 can be dropped
+from the command line. The SAW regulators used by cpufreq are unaffected.
+This is a workaround, not a fix for the SPC hang (see MATRIX.md).
+---
+ .../boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index e9ea0c9..1ed6d67 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -426,6 +426,28 @@
+ 	};
+ };
+ 
++/*
++ * Entering the SPC idle state hangs this board (boot only completes with
++ * cpuidle.off=1). Until that is understood, do not offer the state: with no
++ * usable DT idle state cpuidle-qcom-spm registers nothing and the CPUs idle
++ * in plain WFI, which is what cpuidle.off=1 gives today.
++ */
++&cpu0 {
++	/delete-property/ cpu-idle-states;
++};
++
++&cpu1 {
++	/delete-property/ cpu-idle-states;
++};
++
++&cpu2 {
++	/delete-property/ cpu-idle-states;
++};
++
++&cpu3 {
++	/delete-property/ cpu-idle-states;
++};
++
+ /* The tablet idles around 60 C; start throttling well above that. */
+ &cpu_alert0 {
+ 	temperature = <85000>;

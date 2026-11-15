@@ -1,0 +1,75 @@
+Kernel config changes for the Nexus 7 2013 Wi-Fi (flo), Linux 7.2 apq8064-mainline
+==================================================================================
+
+Reference config (read, not modified):
+  ../nexus7-omarchy/upstream/pmaports/device/testing/
+  linux-postmarketos-qcom-apq8064/config-postmarketos-qcom-apq8064.armv7
+
+"now" = value in that file. Symbols marked (hidden) do not appear in the file
+at all because a parent symbol is off; they become visible once the parent is
+set. None of these lines was build-tested: no kernel was configured or built.
+
+A. Config-only, no DT change needed (LOW risk)
+----------------------------------------------
+CONFIG_BT_QCOMSMD=m            now: not set. Binds the existing "qcom,wcnss-bt"
+                               node. Depends on RPMSG (RPMSG_QCOM_SMD=y) and
+                               QCOM_WCNSS_CTRL=y, both set; selects BT_QCA.
+                               "m" because CONFIG_BT=m. Patch 0003 adds the pins.
+CONFIG_QCOM_PM8XXX_XOADC=y     now: not set. Binds "qcom,pm8921-adc" in pm8921.dtsi
+                               (IIO=y already).
+CONFIG_SENSORS_IIO_HWMON=y     now: not set. Binds the "iio-hwmon" node in
+                               pm8921.dtsi (VBAT, DCIN, VPH, die temperature,
+                               references, charger temperature). HWMON=y already.
+CONFIG_EEPROM_AT24=m           now: not set. Binds eeprom@52 (24c128). Apply
+                               patch 0005 (read-only) with it.
+
+B. Needed by the DT patches
+---------------------------
+Patch 0004 (lid switch)
+  nothing: CONFIG_KEYBOARD_GPIO=y already.
+
+Patch 0006 (audio)
+  CONFIG_SLIMBUS=y                  now: not set
+  CONFIG_SLIM_QCOM_CTRL=y           (hidden) depends on HAS_IOMEM && DMA_ENGINE
+  CONFIG_SND_SOC_APQ8064_TABLA=m    (hidden) depends on OF, GPIOLIB, COMMON_CLK,
+                                    SLIM_QCOM_CTRL; selects SND_SOC_WCD9310
+  already set: SND_SOC=y, SND_SOC_QCOM=y, QCOM_BAM_DMA=y, MSM_LCC_8960=y,
+               SND_JACK=y, SND_JACK_INPUT_DEV=y
+  If SLIM_QCOM_CTRL is built as a module, SND_SOC_APQ8064_TABLA must be a
+  module too.
+
+Patch 0009 (USB host, HIGH RISK)
+  CONFIG_EXTCON_USB_GPIO=y          now: not set (EXTCON=y already)
+  already set: USB_CHIPIDEA_HOST=y, USB_EHCI_HCD=y, CHARGER_SMB347=y,
+               REGULATOR=y, PHY_QCOM_USB_HS=y, USB_STORAGE=m, USB_HID=y
+
+Patch 0010 (LED, HIGH RISK)
+  nothing: CONFIG_LEDS_PM8058=y already.
+
+Patches 0001, 0002, 0005, 0007, 0008, 0011
+  nothing beyond section A.
+
+C. Useful once the sensor chips are identified (do not enable blindly)
+----------------------------------------------------------------------
+Already set: CONFIG_INV_MPU6050_I2C=m, CONFIG_INV_MPU6050_IIO=m, CONFIG_AK8975=y.
+Not set:     CONFIG_AL3010 (the only light-sensor name that appears anywhere in
+             the vendor trees: /persist/lightsensor/AL3010_Config.ini in
+             device/asus/flo init.flo.rc; that path may be a leftover from the
+             2012 Nexus 7).
+The vendor sources do not name the IMU, compass or light sensor, so no driver
+can be selected from evidence yet.
+
+D. Kernel command line
+----------------------
+With patch 0002 applied, cpuidle.off=1 is no longer needed to boot and the
+four "failed to register cpuidle driver" lines disappear. Keep the parameter
+until 0002 is confirmed on the device.
+
+E. Not worth enabling (no DT user possible today)
+-------------------------------------------------
+CONFIG_NFC / NCI drivers        no BCM2079x driver exists in this tree
+CONFIG_VIDEO_OV5693             sensor driver exists, but there is no CSI/VFE
+                                host driver for APQ8064 (camss has no 8960/8064)
+CONFIG_GNSS                     GPS is the SoC's GSS subsystem, no driver
+CONFIG_DRM_ANALOGIX_ANX78XX=m   already set; unusable for flo without driver
+                                changes (see MATRIX.md, SlimPort)

@@ -1,0 +1,23 @@
+ARM: dts: qcom: apq8064-asus-nexus7-flo: make the 0x52 EEPROM read-only
+
+Risk: LOW. Only matters once CONFIG_EEPROM_AT24 is enabled.
+
+The 24c128 at GSBI1 0x52 does not appear anywhere in the vendor board files,
+so its content and purpose are unknown. Expose it read-only so that nothing
+can overwrite it by accident through the nvmem/eeprom sysfs file.
+---
+ arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index 7712851..0d86b28 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -141,6 +141,7 @@
+ 		compatible = "atmel,24c128";
+ 		reg = <0x52>;
+ 		pagesize = <32>;
++		read-only;
+ 	};
+ 
+ 	bq27541@55 {
