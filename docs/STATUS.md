@@ -284,6 +284,9 @@ Il tablet gira su r11 con quattro core. Riga di comando locale:
   `nexus7-thermal-governor` disabilitato (il freno termico è nel kernel) e
   ripulito dal blocco che riscriveva la luminosità. `/boot` non è stato
   rigenerato: p22 contiene ancora `systemd.mask=`, innocuo.
+  Riavvio di conferma alle 16:50: secondo avvio riuscito con `schedutil`,
+  stabile oltre i 200 s (50–64 °C). Sul tablet restano solo i backup e i
+  pacchetti di r9 e r11 (rimossi quelli da r2 a r8, ~0,8 GB).
 
 Ricerca del 2026-11-15: nessun albero ha cpufreq o cooling map per APQ8064;
 il display del flo risulta non funzionante sul 7.2 in postmarketOS; la serie
