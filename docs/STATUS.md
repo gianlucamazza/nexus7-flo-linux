@@ -332,3 +332,24 @@ il display del flo risulta non funzionante sul 7.2 in postmarketOS; la serie
 di Baryshkov del 2023 (krait-l2-cache) non è stata integrata; per gli stati
 di riposo c'è una segnalazione su `pmic_dly` e sulla configurazione SAW2 dei
 core secondari.
+
+Ricerca del 2026-11-15 (sera), punti utili:
+- **L2**: la tabella del kernel originale usa solo tre livelli: CPU 384 MHz →
+  L2 384 MHz (dig 0,95 V / mem 1,05 V); CPU 432–1026 MHz → L2 648 MHz
+  (1,05/1,05 V); CPU ≥ 1080 MHz → L2 1134 MHz (1,15/1,15 V). La serie v4 di
+  Baryshkov (krait-l2-cache, con le alimentazioni del flo: l24 mem, s3 dig)
+  non è stata integrata; OpenWrt porta un driver devfreq più semplice
+  (`krait-cache-devfreq.c`) che passa dalla frequenza di riposo tra due livelli.
+- **GTK4 con GPU su a3xx**: causa trovata in Mesa (MR 44653 e 44873), corretta
+  in Mesa 26.3.0; sul tablet c'è 26.2.6. Provata solo su A306. Il fork
+  `apq8064-mainline/linux` (ramo `qcom-apq8064-v7.2`) ha correzioni A320 non
+  presenti nel nostro commit: a30219ccf8 (niente runtime PM), bac8fc2343 /
+  069be223e0 (mappature condivise), 210a8b4133 (quarantena iova), a66d59b2a2
+  (TLB). Sul tablet la GPU non va mai in sospensione
+  (`runtime_suspended_time=0`), quindi il ritardo da risveglio è escluso.
+- **HZ**: altri kernel postmarketOS per telefoni di questa classe usano 300.
+- **SMB345**: il kernel originale usa 1200 mA per DCP/CDP e riconosce il cavo
+  dal PHY USB; mainline non scrive mai il registro 0x31 né APSD.
+- **Pannello JDI**: SET_DISPLAY_OFF/ENTER_SLEEP_MODE vanno spostati da
+  `.unprepare` a `.disable` (flusso video ancora attivo); la luminosità (0x51)
+  va scritta in `jdi_panel_init()`.
