@@ -1,0 +1,11 @@
+// Let the tablet user power off and reboot from the Phosh menu, also while
+// another session (e.g. SSH) is open: logind otherwise asks for admin
+// authentication and Phosh greys the buttons out.
+polkit.addRule(function(action, subject) {
+    var ids = ["org.freedesktop.login1.power-off",
+               "org.freedesktop.login1.power-off-multiple-sessions",
+               "org.freedesktop.login1.reboot",
+               "org.freedesktop.login1.reboot-multiple-sessions"];
+    if (ids.indexOf(action.id) >= 0 && subject.user == "tablet")
+        return polkit.Result.YES;
+});
