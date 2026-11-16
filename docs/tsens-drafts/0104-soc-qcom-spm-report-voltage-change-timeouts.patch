@@ -1,0 +1,59 @@
+From: Gianluca Mazza <info@gianlucamazza.it>
+Subject: [PATCH] soc: qcom: spm: Report SAW voltage change timeouts
+
+smp_set_vdd_v1_1() gives up after 200 us if SAW STS1 does not reach the
+requested level, but spm_set_voltage_sel() still returns 0. The OPP core
+then raises the CPU clock as if the new voltage had been reached. The
+downstream msm_spm_set_vdd() returns -EIO in that case and acpuclock aborts
+the frequency increase. Propagate -ETIMEDOUT and keep the old selector.
+
+RISKY: if the STS1 comparison is wrong on some SoC, every voltage change
+will now fail (the existing rate-limited error would already show that).
+
+Assisted-by: Claude:claude-opus-5-5
+---
+--- a/drivers/soc/qcom/spm.c
++++ b/drivers/soc/qcom/spm.c
+@@ -85,6 +85,7 @@
+ 	struct device *dev;
+ 	unsigned int volt_sel;
+ 	int reg_cpu;
++	int vdd_err;
+ };
+ 
+ static const u16 spm_reg_offset_v4_1[SPM_REG_NR] = {
+@@ -321,11 +322,25 @@
+ static int spm_set_voltage_sel(struct regulator_dev *rdev, unsigned int selector)
+ {
+ 	struct spm_driver_data *drv = rdev_get_drvdata(rdev);
++	unsigned int old_sel = drv->volt_sel;
++	int ret;
+ 
+ 	drv->volt_sel = selector;
++	drv->vdd_err = 0;
+ 
+ 	/* Always do the SAW register writes on the corresponding CPU */
+-	return smp_call_function_single(drv->reg_cpu, drv->reg_data->set_vdd, drv, true);
++	ret = smp_call_function_single(drv->reg_cpu, drv->reg_data->set_vdd, drv, true);
++	if (!ret)
++		ret = drv->vdd_err;
++	if (ret)
++		/*
++		 * Report the failure so that the OPP core does not go on to
++		 * raise the CPU frequency on a rail that may not have reached
++		 * the new level. The downstream driver returns -EIO here too.
++		 */
++		drv->volt_sel = old_sel;
++
++	return ret;
+ }
+ 
+ static int spm_get_voltage_sel(struct regulator_dev *rdev)
+@@ -382,6 +397,7 @@
+ 				     1, 200, false,
+ 				     drv, SPM_REG_STS1)) {
+ 		dev_err_ratelimited(drv->dev, "timeout setting the voltage (%x %x)!\n", sts, vlevel);
++		drv->vdd_err = -ETIMEDOUT;
+ 		goto enable_avs;
+ 	}
+ 

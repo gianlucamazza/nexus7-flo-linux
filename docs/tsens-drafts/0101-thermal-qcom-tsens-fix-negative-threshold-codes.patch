@@ -1,0 +1,39 @@
+From: Gianluca Mazza <info@gianlucamazza.it>
+Subject: [PATCH] thermal/drivers/qcom/tsens: Fix threshold codes for negative results
+
+degc_to_code() does its arithmetic in u64. When degc * slope + offset is
+negative, which happens for the -40 C lower bound that tsens_set_trips()
+uses below the first trip on a sensor with a small 30 C calibration
+code, the value wraps and is clamped to THRESHOLD_MAX_ADC_CODE. The lower
+threshold then sits above the current temperature and the lower-threshold
+status is permanently asserted. Do the computation in s64 and clamp to the
+width of the sensor's code field (8 bits on MSM8960/APQ8064, where 0x3ff
+would otherwise be truncated by the regmap field write).
+
+Assisted-by: Claude:claude-opus-5-5
+---
+--- a/drivers/thermal/qcom/tsens.c	2026-11-16 02:41:38.095835310 +0100
++++ b/drivers/thermal/qcom/tsens.c	2026-11-16 02:42:36.819014701 +0100
+@@ -290,10 +290,19 @@
+ 
+ static inline u32 degc_to_code(int degc, const struct tsens_sensor *s)
+ {
+-	u64 code = div_u64(((u64)degc * s->slope + s->offset), SLOPE_FACTOR);
++	const struct reg_field *f = &s->priv->fields[LAST_TEMP_0];
++	s64 max_code = min_t(s64, THRESHOLD_MAX_ADC_CODE,
++			     GENMASK(f->msb - f->lsb, 0));
++	/*
++	 * degc and the result can be negative (e.g. the -40 C lower trip
++	 * clamp on a sensor whose 30 C calibration code is small). Doing this
++	 * in u64 wraps around and clamps to the maximum code, which puts the
++	 * lower threshold above the current temperature.
++	 */
++	s64 code = div_s64((s64)degc * s->slope + s->offset, SLOPE_FACTOR);
+ 
+-	pr_debug("%s: raw_code: 0x%llx, degc:%d\n", __func__, code, degc);
+-	return clamp_val(code, THRESHOLD_MIN_ADC_CODE, THRESHOLD_MAX_ADC_CODE);
++	pr_debug("%s: raw_code: %lld, degc:%d\n", __func__, code, degc);
++	return clamp_val(code, THRESHOLD_MIN_ADC_CODE, max_code);
+ }
+ 
+ static inline int code_to_degc(u32 adc_code, const struct tsens_sensor *s)

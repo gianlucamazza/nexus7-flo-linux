@@ -445,3 +445,43 @@ Diagnostica pronta (non ancora attiva): frammento di configurazione con
 rilevatori di soft/hard lockup, carattere Terminus 16×32 e rotazione della
 console, netconsole; piano completo nella cartella `analysis/diag/` della
 sessione.
+
+### Analisi del sensore di temperatura e della CPU (02:40)
+
+r16 (r12 + 0016) si blocca anche lui 50 s dopo la rete USB, in modalità testo
+con schedutil (1 avvio). Il margine di 25 mV da solo non basta.
+
+Lettura del codice (9e45, identico alla punta per thermal/clk/cpufreq/opp/spm):
+- `tsens-8960` su APQ8064 abilita solo i sensori 6–10, fa un SW_RST senza
+  ripristinare CONFIG, legge zone non ancora abilitate e non scarta campioni
+  isolati: plausibili letture spurie (l'avvio delle 01:31 a 110 °C). Il
+  driver originale abilita tutti gli 11 sensori, maschera STATUS_CNTL[3:0],
+  scrive CONFIG 0x9b, aspetta TRDY e usa il fuse di riserva se programmato.
+- L'interrupt tsens (VER_0) gira in contesto hard-IRQ e chiama
+  `thermal_zone_device_update` (mutex): possibile stallo silenzioso se il
+  bit di stato letto (GCC+0x0 bit 0, campo non definito) vale 1. La 0013 lo
+  ha reso attivo. Da verificare con `busybox devmem 0x00900000 32` e
+  `/proc/interrupts`.
+- `spm_set_voltage_sel` ignora il timeout del SAW (200 µs) e la frequenza
+  sale comunque: possibile sottotensione silenziosa.
+- LVS7 alimenta gli HFPLL dei Krait nel kernel originale; qui è legato solo a
+  DSI/pannello.
+- Il kernel originale limita la CPU già da 60 °C (sensore 7); qui si arriva a
+  4×1512 MHz fino a 85 °C.
+- Lo spegnimento termico su flo diventa `machine_halt` (ciclo infinito con IRQ
+  spenti, display spento): non è il blocco silenzioso con immagine ferma.
+
+Ipotesi in ordine: (1) blocco della CPU ad alta frequenza con il chip caldo;
+(2) interrupt tsens in hard-IRQ; (3) timeout SAW ignorato; (4) LVS7; (5)
+pulizia dei regolatori a +30 s; (6) arresto termico. Bozze 0101–0106 in
+`docs/tsens-drafts/` (non provate). Cronologia degli avvii in
+`docs/BOOTS-2026-11-15.md`.
+
+Prove da fare (ognuna almeno due volte): E1 `performance` con tsens; E2
+`userspace` fissato a 1026 MHz; E3 schedutil senza tsens con limite a 1134
+MHz; poi K1 = 0101+0102 (+0103). Senza tsens niente protezione termica:
+limite di frequenza, nessun carico prolungato, 15 minuti al massimo.
+
+r17 = r16 + rilevatori di soft/hard lockup (panic da riga di comando),
+WQ watchdog, pretimeout hrtimer, netconsole, pstore ftrace, PRINTK_CALLER,
+carattere Terminus 16×32 e rotazione della console.

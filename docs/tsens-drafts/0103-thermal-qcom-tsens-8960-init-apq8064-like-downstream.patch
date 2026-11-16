@@ -1,0 +1,165 @@
+From: Gianluca Mazza <info@gianlucamazza.it>
+Subject: [PATCH] thermal/drivers/qcom/tsens-8960: Initialise APQ8064 like the downstream driver
+
+Applies on top of 0013 (STATUS_CNTL clear bits).
+
+On APQ8064 the driver never enables sensors 0-5 (no thermal zone uses
+them) although enable_8960() documents that the sensors must be enabled
+together, it pulses SW_RST from enable_8960() without restoring
+TSENS_CONFIG (resume_8960() restores it after the same reset), it leaves
+the MIN/MAX threshold statuses unmasked, and the first zones read their
+sensors right after the reset, before a conversion has completed.
+
+Do what downstream tsens_hw_init() does for APQ_8064 once, before the zones
+are registered: reset, enable all sensors with the downstream measurement
+period, mask all four threshold statuses (tsens_set_trips() unmasks upper
+and lower), set EN, program TSENS_CONFIG, and wait for TRDY. enable_8960()
+then finds all sensors enabled and does not reset the block again.
+
+Also follow downstream for calibration: use the redundant (backup) fuse
+byte of a sensor when it is non-zero, and warn about sensors with a zero
+calibration byte.
+
+RISKY: changes hardware programming; not tested on hardware.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+--- a/drivers/thermal/qcom/tsens-8960.c
++++ b/drivers/thermal/qcom/tsens-8960.c
+@@ -26,6 +26,8 @@
+ #define SW_RST			BIT(1)
+ 
+ #define MEASURE_PERIOD		BIT(18)
++/* Downstream value for APQ8064: 4 << 18, "1 sec. default" */
++#define MEASURE_PERIOD_8064	(4 << 18)
+ #define SLP_CLK_ENA		BIT(26)
+ #define SLP_CLK_ENA_8660	BIT(24)
+ #define SENSOR0_SHIFT		3
+@@ -33,6 +35,7 @@
+ #define THRESHOLD_ADDR		0x3624
+ 
+ #define INT_STATUS_ADDR		0x363c
++#define TRDY_MASK		BIT(7)
+ /* APQ8064: upper/lower status clear bits live here, not in CNTL */
+ #define STATUS_CNTL_ADDR_8064	0x3660
+ 
+@@ -181,23 +184,37 @@
+ static int calibrate_8960(struct tsens_priv *priv)
+ {
+ 	int i;
+-	char *data;
++	char *data, *backup;
+ 	u32 p1[11];
+ 
+ 	data = qfprom_read(priv->dev, "calib");
+-	if (IS_ERR(data))
+-		data = qfprom_read(priv->dev, "calib_backup");
++	backup = qfprom_read(priv->dev, "calib_backup");
++	if (IS_ERR(data)) {
++		data = backup;
++		backup = ERR_PTR(-ENOENT);
++	}
+ 	if (IS_ERR(data))
+ 		return PTR_ERR(data);
+ 
+ 	for (i = 0; i < priv->num_sensors; i++) {
+-		p1[i] = data[i];
++		/*
++		 * The downstream driver (msm8960_tsens.c) uses the redundant
++		 * (backup) fuse of a sensor whenever it is non-zero, and treats
++		 * a zero calibration byte as "not calibrated".
++		 */
++		p1[i] = (u8)data[i];
++		if (!IS_ERR(backup) && (u8)backup[i])
++			p1[i] = (u8)backup[i];
++		if (!p1[i])
++			dev_warn(priv->dev, "sensor %d has no calibration data\n", i);
+ 		priv->sensor[i].slope = tsens_msm8960_slope[i];
+ 	}
+ 
+ 	compute_intercept_slope(priv, p1, NULL, ONE_PT_CALIB);
+ 
+ 	kfree(data);
++	if (!IS_ERR(backup))
++		kfree(backup);
+ 
+ 	return 0;
+ }
+@@ -266,16 +283,75 @@
+  * tsens_set_trips() call clear the enable bits of sensors 6 and 7, freezing
+  * their readings at the last value.
+  */
++/*
++ * Bring up the APQ8064 TSENS block the way the downstream tsens_hw_init()
++ * does: reset it, enable all sensors in one go (the hardware misbehaves when
++ * only some of them are enabled, see enable_8960()), keep the threshold
++ * statuses masked until tsens_set_trips() unmasks the upper/lower ones,
++ * program TSENS_CONFIG, which a SW reset does not preserve (resume_8960()
++ * restores it for the same reason), and wait for the first conversion so the
++ * thermal zones registered next do not read stale or reset values.
++ */
++static int hw_init_8064(struct tsens_priv *priv)
++{
++	struct regmap *map = priv->tm_map;
++	u32 cntl, status;
++	int ret;
++
++	ret = regmap_read(map, CNTL_ADDR, &cntl);
++	if (ret)
++		return ret;
++
++	ret = regmap_write(map, CNTL_ADDR, cntl | SW_RST);
++	if (ret)
++		return ret;
++
++	cntl &= ~SW_RST;
++	cntl |= SLP_CLK_ENA | MEASURE_PERIOD_8064 |
++		(GENMASK(priv->num_sensors - 1, 0) << SENSOR0_SHIFT);
++	ret = regmap_write(map, CNTL_ADDR, cntl);
++	if (ret)
++		return ret;
++
++	/* MIN mask, LOWER clear, UPPER clear, MAX mask */
++	ret = regmap_update_bits(map, STATUS_CNTL_ADDR_8064, GENMASK(3, 0),
++				 GENMASK(3, 0));
++	if (ret)
++		return ret;
++
++	ret = regmap_write(map, CNTL_ADDR, cntl | EN);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(map, CONFIG_ADDR, CONFIG_MASK | CONFIG, CONFIG);
++	if (ret)
++		return ret;
++
++	ret = regmap_read_poll_timeout(map, INT_STATUS_ADDR, status,
++				       status & TRDY_MASK, 1000, 2000000);
++	if (ret)
++		dev_warn(priv->dev, "no temperature conversion after reset\n");
++
++	return 0;
++}
++
+ static int init_8960(struct tsens_priv *priv)
+ {
+-	if (of_machine_is_compatible("qcom,apq8064")) {
++	bool apq8064 = of_machine_is_compatible("qcom,apq8064");
++	int ret;
++
++	if (apq8064) {
+ 		tsens_8960_regfields[LOW_INT_CLEAR_0] =
+ 			(struct reg_field)REG_FIELD(STATUS_CNTL_ADDR_8064, 1, 1);
+ 		tsens_8960_regfields[UP_INT_CLEAR_0] =
+ 			(struct reg_field)REG_FIELD(STATUS_CNTL_ADDR_8064, 2, 2);
+ 	}
+ 
+-	return init_common(priv);
++	ret = init_common(priv);
++	if (ret || !apq8064)
++		return ret;
++
++	return hw_init_8064(priv);
+ }
+ 
+ static const struct tsens_ops ops_8960 = {

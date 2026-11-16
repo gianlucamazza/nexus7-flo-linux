@@ -1,0 +1,43 @@
+From: Gianluca Mazza <info@gianlucamazza.it>
+Subject: [PATCH] thermal/drivers/qcom/tsens-8960: Use the downstream sensor slopes
+
+The downstream MSM8960/APQ8064 driver computes
+  degC = 30 + (code - calib) * slope / 1000
+with slope in milli-degC per ADC code. This driver computes
+  degC = 30 + (code - p1) * 1000 / slope
+with slope in codes per degC (x1000), but its table is the downstream
+value minus 350, not its inverse. For the APQ8064 CPU sensors that is
+-1.8% (sensors 7, 9: cpu0, cpu2) and +13% (sensors 8, 10: cpu1, cpu3) of
+the distance from 30 C; cpu1 and cpu3 report 110 C at about 101 C.
+
+Use 10^6 / downstream slope.
+
+RISKY: also changes MSM8960 and IPQ8064 readings; unverified against a
+reference thermometer.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+--- a/drivers/thermal/qcom/tsens-8960.c
++++ b/drivers/thermal/qcom/tsens-8960.c
+@@ -51,11 +51,17 @@
+ #define S9_STATUS_OFF		0x3674
+ #define S10_STATUS_OFF		0x3678
+ 
+-/* Original slope - 350 to compensate mC to C inaccuracy */
++/*
++ * ADC codes per degree C, times 1000. The downstream driver specifies the
++ * inverse (milli-degC per code: 1176, 1176, 1154, 1176, 1111, 1132, 1132,
++ * 1199, 1132, 1199, 1132); these are 10^6 / those values. The previous
++ * "downstream - 350" values over-read sensors 4-6, 8 and 10 by 13-18% of
++ * the distance from the 30 C calibration point.
++ */
+ static u32 tsens_msm8960_slope[] = {
+-			826, 826, 804, 826,
+-			761, 782, 782, 849,
+-			782, 849, 782
++			850, 850, 867, 850,
++			900, 883, 883, 834,
++			883, 834, 883
+ 			};
+ 
+ static int suspend_8960(struct tsens_priv *priv)
