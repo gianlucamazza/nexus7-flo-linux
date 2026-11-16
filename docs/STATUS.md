@@ -578,3 +578,40 @@ Strumenti: regola udev `70-nexus7-devcoredump.rules` + script
 `/var/lib/nexus7-devcoredump/`; `crashdec` di Mesa compilato sul portatile.
 r20 in compilazione: punta del fork (correzioni A320) con revert di
 a66d59b2a223 (TLB invalidation dal command stream) + tutte le patch di r19.
+
+## 16 novembre, pomeriggio: misure, touch, flo-shell al posto di Phosh
+
+Strumenti nuovi in `scripts/`:
+- `nexus7-perfprobe`: campionatore leggero, circa l'1% di un core.
+- `nexus7-uibench` / `flo-uibench`: sequenza automatica con touchscreen e tastiera virtuali (uinput, wtype) e risultati per fase.
+- `nexus7-hwcheck`: verifiche di touch e display.
+- `nexus7-diag-collect` / `flo-diag`: archivio diagnostico completo.
+- `nexus7-save-devcoredump` con la regola udev: copie dei crash della GPU.
+- `flo-kernel`: compilazione incrementale con envkernel, 100 s invece di circa 100 min.
+
+Misure (Phosh, r20):
+- I gesti di shell, la panoramica e la tendina tengono 60 fotogrammi al secondo.
+- Impostazioni impiega più di 10 s all'apertura con l'80% di un core (lavoro GTK4 sulla CPU).
+- GTK4 su GPU contro cairo, 3 prove ciascuno: nessuna differenza misurabile. Resta cairo, perché evita il rischio di blocchi della A320.
+- Spinta al tocco a 1512 MHz; sei plugin di gnome-settings-daemon disattivati.
+
+Touch/display (`nexus7-hwcheck`):
+- Display a 60 fotogrammi al secondo; 5 cicli di spegnimento e riaccensione senza errori.
+- Il touch dichiarava 75 × 373 mm. r21 (0106/0107, proprietà `touchscreen-x/y-mm`) lo porta a 96 × 149 mm; il pannello misura circa 94 × 151.
+- Ogni cambio di luminosità registra `dsi_err_worker: status=5` (ACK + DLN0): da indagare.
+
+flo-shell (Hyprland 0.54.3, Quickshell 0.3.2) sul tablet:
+- Hyprland parte su GLES 3.0 (ripiego da 3.2).
+- Collaudo automatico superato: barra, tendina, launcher, notifiche, menu di alimentazione, tastiera wvkbd, blocco.
+- Correzioni emerse sul dispositivo:
+  - lanciatore `start-hyprland`;
+  - controllo di guiutils disattivato (il pacchetto non esiste per armv7);
+  - portali e hyprpolkitagent;
+  - sessione in italiano;
+  - Impostazioni avviata con `XDG_CURRENT_DESKTOP=GNOME`;
+  - soglia dello scorrimento lungo da 28 a 65 mm;
+  - comando di sessione per greetd come stringa unica;
+  - PAM del blocco scritto per intero.
+- Hyprland 0.54 va in crash se un touchscreen virtuale viene aggiunto e rimosso in rapida successione. Lo strumento di collaudo ora ne usa uno solo.
+
+Phosh rimosso su richiesta dell'utente (99 pacchetti, circa 160 MB). greetd usa il greeter di flo-shell; la configurazione di Phrog è salvata in `/var/tmp/flo-pkgs/greetd-config.toml.phrog` e il world precedente in `/var/tmp/flo-pkgs/world.before-phosh-removal`. Restano installati, perché servono: upower, gnome-control-center, gnome-keyring, adwaita-icon-theme, ca-certificates, dconf, libnotify. Avvio completo verificato fino al greeter con r21.
