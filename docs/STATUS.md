@@ -391,3 +391,57 @@ Altre misure della sera:
   `venus-protocol` copiati da Alpine in `temp/`.
 
 Progetto shell separato: `../flo-shell`.
+
+## Notte 15–16 novembre: blocchi, analisi e correzioni
+
+Correzioni a quanto scritto sopra:
+- Il blocco di r13 **non** è dimostrato dipendere da `CONFIG_HZ=300`: r14
+  (HZ=100) si è poi bloccato 2 volte su 3 avvii grafici.
+- La cache L2 a 1134 MHz non è il fattore comune: blocchi anche con L2 a 384
+  (r11) e 648 MHz (r13 con DTB di r12, r12 alle 01:23).
+- La “mancata corrispondenza dei moduli” r14/r15 è esclusa: i 562 moduli di
+  r15 hanno codice e dati identici a r14, 0 CRC diversi (analisi in
+  `analysis/build/BUILD-DIFF.md` della sessione). Stesso compilatore (Alpine
+  clang 23.1.5) in r9–r15; l’Image di r14 coincide con quella di r12 a parte i
+  metadati.
+
+Cronologia degli avvii (28 da r9) ricostruita: 10 blocchi, tutti 40–60 s dopo
+la comparsa della rete USB; dalla sera del 15 6 avvii grafici su 8 bloccati.
+
+Riproduzione con registro in diretta (01:16, r14, modalità testo + `systemctl
+start greetd`): blocco totale dopo 56 s, nessun messaggio del kernel; all’ultimo
+campione 4 core a 1512 MHz, 63–76 °C, batteria −409 mA a 4,0 V (ingresso
+SMB345 tornato a 500 mA al riavvio).
+
+Registro su disco (journald con `SyncIntervalSec=2s`, copiato da TWRP e letto
+con `journalctl -D` sul portatile): all’avvio delle 01:31 (powersave) il kernel
+legge ≥110 °C su cpu1/cpu2/cpu3 a 27 s e ordina `HARDWARE PROTECTION shutdown
+(Temperature too high)`; systemd spegne. Su flo lo spegnimento non toglie
+l’alimentazione (nessun nodo pshold), il tablet resta fermo a schermo spento.
+Letture spurie del tsens (patch 0013 da rivedere) o temperature reali sui
+core 1–3: da chiarire.
+
+Tensioni CPU (r12, modalità testo, powersave):
+- I regolatori SPM dei core 1–3 restano a **1,30 V** finché la loro frequenza
+  non cambia una prima volta (il consumer `cpuN-cpu` ha min/max 0); il core 0
+  è a 0,875 V. Forzando un cambio di frequenza su cpu1–3 la corrente di
+  batteria a riposo scende da −553/−670 mA a −241 mA.
+- Il PVS letto è speed14/pvs6: 1512 MHz a 987,5 mV. Il kernel originale
+  (`acpuclock-8064.c`, `pvs_tables[14][1..6].boost_uv = 25000`, `enable_boost`
+  vero di default) aggiunge **25 mV a ogni livello**; la tabella OPP della 0010
+  non li include. Patch 0016 li aggiunge (speed0 pvs1/3/4, speed14 pvs1–6).
+
+Prove senza ricompilare:
+- powersave + modalità testo + `initcall_blacklist=tsens_driver_init` +
+  `module_blacklist=wcn36xx`: avvio regolare; `greetd` avviato a 384 MHz senza
+  blocchi per oltre 3 minuti, batteria −210 mA.
+- Senza wcn36xx (schedutil) il blocco si ripete: il Wi-Fi è escluso.
+- `systemd.watchdog_sec=30` va evitato finché lo spegnimento non è chiarito.
+
+r16: base r12 (L2 648 MHz, HZ=100) + 0016. Il pacchetto r15 (punta del fork)
+resta da riprovare dopo aver stabilizzato le tensioni.
+
+Diagnostica pronta (non ancora attiva): frammento di configurazione con
+rilevatori di soft/hard lockup, carattere Terminus 16×32 e rotazione della
+console, netconsole; piano completo nella cartella `analysis/diag/` della
+sessione.
