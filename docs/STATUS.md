@@ -631,3 +631,43 @@ DSI (attesa della fine del fotogramma su DSI v2) ed è aperta.
 r23 = r21 + `CONFIG_BT_QCOMSMD=m` (Bluetooth via WCNSS SMD); bluez installato.
 
 r23 sul tablet: `btqcomsmd` carica, `hci0` presente, BlueZ attivo, la scansione trova dispositivi (5 in 8 s). Avvii r23: 1.
+
+### Chiusura dei problemi rimasti (16 novembre, sera)
+
+- **Kernel r23** (r21 + Bluetooth WCNSS): 3 avvii su 3, nessun servizio fallito, pstore e devcoredump senza nuovi file.
+- **Shell r3** (flo-shell 91e9dd0…f87506f):
+  - greeter con la sola sessione flo-shell (elenco consentito, `FLO_GREETER_SESSIONS`), in italiano;
+  - IPC `idleInhibit`;
+  - app avviate in scope `app-*.scope` e collegamento a flo-sessiond;
+  - volume e Bluetooth nascosti senza dispositivo;
+  - `flo-shell-session.target` lega `graphical-session.target` (prima i portali non partivano: "Current graphical user session is inactive");
+  - `gnome-settings-daemon` (solo schemi) per Impostazioni, che altrimenti andava in crash con `Settings schema 'org.gnome.settings-daemon.plugins.color' is not installed`.
+- **Congelamento delle app, verificato sul tablet:** con Impostazioni e foot, l'app in secondo piano va a `cgroup.freeze=1` e viene scongelata entro 1 s quando torna in primo piano (`freezer.freezes=2 thaws=1`).
+- **Quickshell 0.3.2-r1:** Hyprland su armv7 estende col segno gli indirizzi delle finestre nel protocollo di mappatura (`ffffffffa8802720` contro `a8802720` dell'IPC). Ogni finestra compariva due volte e una copia sopravviveva alla chiusura (la shell contava 6 finestre con zero aperte). Patch locale in `temp/quickshell`: ora il conteggio coincide con `hyprctl clients`. Causa a monte: cast da puntatore a `uint64_t` in Hyprland, da segnalare.
+- **Hot reload di Quickshell:** dopo un `apk add` che sostituisce i file, l'osservazione dei file si perde. Riavviare la shell (`pkill -u tablet -x quickshell`; `flo-shell run` la fa ripartire).
+- **`nexus7-hwcheck` su flo-shell:**
+  - touch 96 × 149 mm PASS;
+  - 60,1 fotogrammi/s PASS;
+  - 5 cicli DPMS PASS;
+  - luminosità: errori DSI noti (vedi diagnosi sopra).
+
+Misure `flo-uibench`, 3 ripetizioni, confrontate con Phosh (stessa fase, % di un core):
+
+| Fase | Phosh | flo-shell |
+|---|---|---|
+| Panoramica | 60 fps, phosh 13 + phoc 13 | 60 fps, quickshell 20–30 + Hyprland 11–13 |
+| Tendina | 60 fps, phosh 17 + phoc 15 | 60 fps, quickshell 22–25 + Hyprland 12–15 |
+| Apertura Impostazioni | 18–26 fps, gcc 75–82 | 22–26 fps, gcc 75–78 |
+| Scrittura | 60 fps, gcc 25 + phoc 14 + squeekboard 11 | 60 fps, gcc 20–22 + Hyprland 10 |
+| CPU totale | circa 37% (Impostazioni) | circa 26% (Impostazioni) |
+
+Conclusione: entrambe tengono 60 fotogrammi al secondo nei gesti. flo-shell costa un po' di più nei gesti della shell (QML/scene graph), meno in totale. La lentezza percepita resta l'apertura delle app GTK4, che è lavoro di CPU dell'app.
+
+Aperti:
+- errore DSI alla variazione di luminosità (driver DSI v2);
+- indicatore di caricamento sovrapposto all'etichetta del PIN nel greeter;
+- conversione in Lua della configurazione di Hyprland prima della 0.57;
+- audio WCD9310;
+- sensori;
+- segnalazioni a monte: Hyprland (indirizzi a 32 bit) e Quickshell;
+- rimozione della chiave SSH diagnostica (su conferma).
