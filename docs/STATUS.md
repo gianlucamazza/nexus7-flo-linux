@@ -531,3 +531,19 @@ riaccendendo lo schermo non compaiono più `cmd dma tx failed` né
 timed out` non bloccanti. Mesa 26.3.0 per armv7: rusticl e driver che
 richiedono Rust (panfrost, etnaviv, lima, vc4, v3d, tegra) tolti dalla ricetta
 locale in `temp/mesa`.
+
+### Mesa 26.3.0 sul tablet (2026-11-16)
+
+Compilata localmente per armv7 (`temp/mesa`: senza rusticl e senza i driver
+che richiedono Rust; `temp/venus-protocol`; crossdirect corretto in
+`cross/crossdirect`). Installati mesa, dri-gallium, egl, gbm, gl, gles
+26.3.0-r0 (copia del database apk in `/var/tmp/mesa-26.3.0/`). `eglinfo`:
+FD320, OpenGL ES 3.0 Mesa 26.3.0.
+
+Prova: `gnome-control-center` con `GSK_RENDERER=gl` (nome attuale del
+renderer GL di GTK4) usa `libgallium-26.3.0` e `renderD128`, nessun errore o
+blocco della GPU. L'utente non percepisce differenze di fluidità: il lag
+percepito viene soprattutto da Phosh (GTK3, disegnato dalla CPU). Reso
+predefinito `GSK_RENDERER=gl` (`/etc/environment.d/90-nexus7-graphics.conf`,
+drop-in di greetd); tolto `WLR_RENDERER=pixman`, che phoc ignorava (usa GLES).
+`kworker` della devfreq GPU: 1,5 ms ogni 3 s, trascurabile.
