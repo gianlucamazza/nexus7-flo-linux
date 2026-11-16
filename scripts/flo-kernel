@@ -17,6 +17,11 @@ JOBS=${JOBS:-$(nproc)}
 envk() {
 	cd "$KTREE"
 	export pmbootstrap_dir="$ROOT/scripts/envkernel-shim"
+	# envkernel.sh looks for $XDG_CONFIG_HOME/pmbootstrap_v3.cfg to decide
+	# whether to run "pmbootstrap init"; point it at the project config.
+	mkdir -p "$ROOT/build/envkernel-xdg"
+	ln -sfn "$ROOT/config/pmbootstrap.cfg" "$ROOT/build/envkernel-xdg/pmbootstrap_v3.cfg"
+	export XDG_CONFIG_HOME="$ROOT/build/envkernel-xdg"
 	# envkernel.sh defines "make" as an alias that runs in the native chroot
 	shopt -s expand_aliases
 	set +u
@@ -27,8 +32,9 @@ envk() {
 case "${1:-}" in
 build)
 	envk
-	mkdir -p .output
-	cp "$PKGDIR/config-postmarketos-qcom-apq8064.armv7" .output/.config
+	# .output belongs to the chroot's pmos user (envkernel creates it)
+	sudo install -m 644 -o "$(stat -c %u .output)" -g "$(stat -c %g .output)" \
+		"$PKGDIR/config-postmarketos-qcom-apq8064.armv7" .output/.config
 	ver="$(sed -n 's/^pkgrel=//p' "$PKGDIR/APKBUILD" | awk '{print $1+1}')-postmarketos-qcom-apq8064"
 	# eval: the alias is only expanded in code parsed after it was defined
 	eval make olddefconfig
