@@ -506,3 +506,20 @@ Ripresa:
    `/var/lib/systemd/pstore`. Se resta fermo: TWRP e journal come sopra.
 4. Se regge: `greetd` a mano con registrazione, poi E1/E2/E3 dell'analisi
    (almeno due avvii ciascuno).
+
+### r18 stabile (2026-11-16 mattina)
+
+La mattina il tablet si spegneva da solo 50 s dopo l'avvio anche nella
+configurazione sicura: batteria al **4 %** (3,5 V), scaricata nella notte
+perché l'ingresso SMB345 torna a 500 mA a ogni avvio e il sistema consumava
+di più. Ricaricata al 100 % in TWRP con il caricatore a muro.
+
+r18 (r16 + diagnostica + 0101 tsens soglie con segno, 0102 interrupt tsens in
+thread, 0105 LVS7 sempre acceso), schedutil, tsens attivo, Wi-Fi attivo:
+4 avvii su 4 senza blocchi (1 in modalità testo con `greetd` avviato a mano,
+3 avvii grafici con sblocco e sessione Phosh), core fino a 4×1512 MHz,
+50–68 °C. Nessun messaggio dei rilevatori di blocco.
+
+Limite: non è separato quanto abbiano contato le correzioni di r18 e quanto
+la batteria carica. Alcuni blocchi della notte (01:16, r14) erano con
+batteria intorno al 70 %, quindi la batteria da sola non li spiega.
