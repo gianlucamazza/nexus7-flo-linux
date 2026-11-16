@@ -485,3 +485,24 @@ limite di frequenza, nessun carico prolungato, 15 minuti al massimo.
 r17 = r16 + rilevatori di soft/hard lockup (panic da riga di comando),
 WQ watchdog, pretimeout hrtimer, netconsole, pstore ftrace, PRINTK_CALLER,
 carattere Terminus 16×32 e rotazione della console.
+
+### Stato alle 04:00 e procedura per la ripresa
+
+Il tablet è fermo dal blocco di r16 (02:18). Sulla p22 c'è r16 in modalità
+testo con schedutil; sul rootfs moduli r16 (coerenti).
+
+Pacchetti pronti sul portatile: r17 (r16 + diagnostica + carattere grande) e
+r18 (r17 + 0101, 0102, 0105). Script `install-r18-remote.sh` nella cartella
+privata: imposta `softlockup_panic=1 nmi_watchdog=panic
+sysctl.kernel.panic_on_rcu_stall=1 panic=10 pstore.compress=none
+fbcon=font:TER16x32`, modalità testo, schedutil, tsens attivo.
+
+Ripresa:
+1. TWRP; sulla p22 mettere la riga di avvio sicura (powersave,
+   `initcall_blacklist=tsens_driver_init`, modalità testo); avviare r16.
+2. Installare r18 con lo script; riavviare in modalità testo.
+3. Se si blocca: con i rilevatori attivi dovrebbe andare in panic e
+   riavviarsi da solo dopo 10 s; leggere `/sys/fs/pstore` e
+   `/var/lib/systemd/pstore`. Se resta fermo: TWRP e journal come sopra.
+4. Se regge: `greetd` a mano con registrazione, poi E1/E2/E3 dell'analisi
+   (almeno due avvii ciascuno).
