@@ -629,3 +629,5 @@ funziona e lo schermo non mostra difetti; la correzione giusta è nel driver
 DSI (attesa della fine del fotogramma su DSI v2) ed è aperta.
 
 r23 = r21 + `CONFIG_BT_QCOMSMD=m` (Bluetooth via WCNSS SMD); bluez installato.
+
+r23 sul tablet: `btqcomsmd` carica, `hci0` presente, BlueZ attivo, la scansione trova dispositivi (5 in 8 s). Avvii r23: 1.
