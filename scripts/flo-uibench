@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Run the UI benchmark on the tablet and analyse it on the laptop.
+#   scripts/flo-uibench [label] [phases]
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+PRIV="$HOME/nexus7-recovery-20261114"
+LABEL=${1:-$(date +%H%M%S)}
+PHASES=${2:-settings,overview,quicksettings,launcher,typing}
+SSH=(ssh -i "$PRIV/diagnostic-key" -o UserKnownHostsFile="$PRIV/known_hosts" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=10)
+HOST=${FLO_HOST:-root@<tablet-usb-address>}
+scp -q "${SSH[@]:1}" "$ROOT/scripts/nexus7-uibench" "$ROOT/scripts/nexus7-perfprobe" "$HOST:/usr/local/sbin/"
+"${SSH[@]}" "$HOST" "nexus7-uibench --label '$LABEL' --phases '$PHASES' ${FLO_GSK:+--gsk $FLO_GSK}"
+mkdir -p "$PRIV/uibench"
+scp -q "${SSH[@]:1}" "$HOST:/var/tmp/uibench/$LABEL.probe" "$HOST:/var/tmp/uibench/$LABEL.marks" "$PRIV/uibench/"
+python3 -I "$ROOT/scripts/perf-analyze.py" "$PRIV/uibench/$LABEL.probe" --marks "$PRIV/uibench/$LABEL.marks" --top 6 | tee "$PRIV/uibench/$LABEL.txt"

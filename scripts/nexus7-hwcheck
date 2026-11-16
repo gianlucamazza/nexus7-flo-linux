@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""Touch and display checks for the Nexus 7 (runs on the tablet as root).
+
+    nexus7-hwcheck                 # automatic checks
+    nexus7-hwcheck --interactive   # plus guided touch checks (needs a person)
+
+Automatic:
+  touch-static     touchscreen present, driver, axis ranges vs the panel, slots
+  display-static   connector status, mode, DPMS
+  display-vblank   presented frame rate while the shell animates (virtual touch)
+  backlight        several levels, actual_brightness follows, no DSI errors
+  blank-cycles     5 screen off/on cycles through Hyprland DPMS, frames resume,
+                   no DSI errors
+Interactive:
+  touch-corners    touch 5 targets; reported positions vs expected
+  touch-multi      put as many fingers as possible; maximum contacts seen
+  touch-rate       drag one finger for 3 s; report rate in Hz
+
+Every check prints PASS/FAIL/INFO lines; the exit code is the number of FAILs.
+"""
+import argparse
+import glob
+import importlib.machinery
+import importlib.util
+import os
+import re
+import select
+import subprocess
+import time
+
+from evdev import InputDevice, ecodes as e, list_devices
+
+W, H = 1200, 1920
+DSI_ERR = re.compile(r"cmd dma tx failed|DCS .* failed|dsi_err|underrun|hangcheck|gpu fault")
+fails = 0
+
+
+def report(status, check, msg):
+    global fails
+    if status == "FAIL":
+        fails += 1
+    print(f"{status:<4} {check:<15} {msg}", flush=True)
+
+
+def sh(cmd):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout.strip()
+
+
+def irq(name):
+    for line in open("/proc/interrupts"):
+        f = line.split()
+        if f and f[-1] == name:
+            return sum(int(x) for x in f[1:5] if x.isdigit())
+    return 0
+
+
+def dmesg_errors():
+    return len([l for l in sh("dmesg").splitlines() if DSI_ERR.search(l)])
+
+
+def load_uibench():
+    path = "/usr/local/sbin/nexus7-uibench"
+    loader = importlib.machinery.SourceFileLoader("uibench", path)
+    spec = importlib.util.spec_from_loader("uibench", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def find_touch():
+    for p in list_devices():
+        d = InputDevice(p)
+        if d.name == "Elan Touchscreen":
+            return d
+    return None
+
+
+def touch_static():
+    d = find_touch()
+    if not d:
+        report("FAIL", "touch-static", "Elan Touchscreen not found")
+        return None
+    caps = d.capabilities(absinfo=True).get(e.EV_ABS, [])
+    ax = {code: info for code, info in caps}
+    x, y = ax.get(e.ABS_MT_POSITION_X), ax.get(e.ABS_MT_POSITION_Y)
+    slots = ax.get(e.ABS_MT_SLOT)
+    drv = os.path.basename(os.path.realpath(f"/sys/class/input/{os.path.basename(d.path)}/device/device/driver"))
+    report("INFO", "touch-static", f"{d.path} driver={drv} x=0..{x.max} y=0..{y.max} "
+           f"res={x.resolution}/{y.resolution} slots={slots.max + 1 if slots else '?'}")
+    if (x.max, y.max) in ((W - 1, H - 1), (W, H)):
+        report("PASS", "touch-static", "axis range matches the 1200x1920 panel")
+    else:
+        report("INFO", "touch-static", f"axis range {x.max}x{y.max} differs from the panel; libinput scales it")
+    if x.resolution and y.resolution:
+        mm = ((x.max + 1) / x.resolution, (y.max + 1) / y.resolution)
+        ok = abs(mm[0] - 94) < 10 and abs(mm[1] - 151) < 15
+        report("PASS" if ok else "FAIL", "touch-static",
+               f"physical size from resolution {mm[0]:.0f}x{mm[1]:.0f} mm (panel is about 94x151 mm)")
+    else:
+        report("INFO", "touch-static", "no axis resolution reported; libinput cannot know the size in mm")
+    return d
+
+
+def display_static():
+    con = glob.glob("/sys/class/drm/card*-DSI-*")
+    if not con:
+        report("FAIL", "display-static", "no DSI connector")
+        return
+    c = con[0]
+    st = open(f"{c}/status").read().strip()
+    modes = open(f"{c}/modes").read().split()
+    dpms = open(f"{c}/dpms").read().strip()
+    report("PASS" if st == "connected" else "FAIL", "display-static", f"{os.path.basename(c)} {st} modes={modes} dpms={dpms}")
+
+
+def measure_vblank(ub, t, gesture):
+    a, t0 = irq("msm"), time.time()
+    gesture(t)
+    return (irq("msm") - a) / (time.time() - t0)
+
+
+def display_vblank(ub, t):
+    fps = measure_vblank(ub, t, ub.phase_quicksettings)
+    report("PASS" if 50 <= fps <= 65 else "FAIL", "display-vblank", f"{fps:.1f} frames/s while the panel animates")
+
+
+def backlight():
+    bl = glob.glob("/sys/class/backlight/*")[0]
+    mx = int(open(f"{bl}/max_brightness").read())
+    orig = int(open(f"{bl}/brightness").read())
+    e0 = dmesg_errors()
+    bad = []
+    for lvl in (1, mx // 4, mx // 2, mx, orig):
+        open(f"{bl}/brightness", "w").write(str(lvl))
+        time.sleep(0.6)
+        act = int(open(f"{bl}/actual_brightness").read())
+        if act != lvl:
+            bad.append(f"{lvl}->{act}")
+    errs = dmesg_errors() - e0
+    report("PASS" if not bad and errs == 0 else "FAIL", "backlight",
+           f"levels 1,{mx//4},{mx//2},{mx},{orig} ok; mismatches={bad or 'none'}; new DSI errors={errs}")
+
+
+def power_save(mode, ub=None):
+    """Screen off (3) / on (0) through Hyprland's DPMS dispatcher."""
+    sig = sh("ls -t /run/user/10000/hypr | head -n 1")
+    state = "off" if mode else "on"
+    sh(f"runuser -u tablet -- env XDG_RUNTIME_DIR=/run/user/10000 HYPRLAND_INSTANCE_SIGNATURE={sig} "
+       f"hyprctl dispatch dpms {state}")
+
+
+def blank_cycles(ub, t, n=5):
+    e0 = dmesg_errors()
+    low = []
+    for i in range(n):
+        power_save(3)
+        time.sleep(2.0)
+        power_save(0)
+        time.sleep(2.0)
+        fps = measure_vblank(ub, t, ub.phase_quicksettings_once)
+        if fps < 40:
+            low.append(f"#{i+1}:{fps:.0f}")
+    errs = dmesg_errors() - e0
+    report("PASS" if not low and errs == 0 else "FAIL", "blank-cycles",
+           f"{n} off/on cycles; frames after wake low={low or 'none'}; new DSI errors={errs}")
+
+
+def read_touches(d, seconds):
+    """Collect (time, slot, x, y) samples from the real touchscreen."""
+    out, slot, pos = [], 0, {}
+    end = time.time() + seconds
+    while time.time() < end:
+        r, _, _ = select.select([d.fd], [], [], 0.1)
+        if not r:
+            continue
+        for ev in d.read():
+            if ev.type == e.EV_ABS:
+                if ev.code == e.ABS_MT_SLOT:
+                    slot = ev.value
+                elif ev.code == e.ABS_MT_POSITION_X:
+                    pos.setdefault(slot, [None, None])[0] = ev.value
+                elif ev.code == e.ABS_MT_POSITION_Y:
+                    pos.setdefault(slot, [None, None])[1] = ev.value
+                elif ev.code == e.ABS_MT_TRACKING_ID and ev.value == -1:
+                    pos.pop(slot, None)
+            elif ev.type == e.EV_SYN:
+                out.append((ev.timestamp(), dict((s, tuple(p)) for s, p in pos.items() if None not in p)))
+    return out
+
+
+def interactive(d):
+    targets = [("top-left", 60, 60), ("top-right", W - 60, 60), ("center", W // 2, H // 2),
+               ("bottom-left", 60, H - 60), ("bottom-right", W - 60, H - 60)]
+    worst = 0
+    for name, tx, ty in targets:
+        input(f"\nTouch and hold the {name} corner area (~1 cm from the edges), then press Enter here... ")
+        s = read_touches(d, 2.0)
+        pts = [p for _, f in s for p in f.values()]
+        if not pts:
+            report("FAIL", "touch-corners", f"{name}: no touch seen")
+            continue
+        x = sum(p[0] for p in pts) / len(pts)
+        y = sum(p[1] for p in pts) / len(pts)
+        err = max(abs(x - tx), abs(y - ty))
+        worst = max(worst, err)
+        report("INFO", "touch-corners", f"{name}: reported {x:.0f},{y:.0f} (target {tx},{ty})")
+    report("PASS" if worst < 150 else "FAIL", "touch-corners", f"worst distance from target {worst:.0f} px")
+    input("\nPut as many fingers as you can on the screen and keep them there, then press Enter... ")
+    s = read_touches(d, 3.0)
+    mx = max((len(f) for _, f in s), default=0)
+    report("PASS" if mx >= 5 else "FAIL", "touch-multi", f"maximum simultaneous contacts {mx}")
+    input("\nDrag one finger around continuously for 3 seconds after pressing Enter... ")
+    s = read_touches(d, 3.0)
+    ts = [t for t, f in s if f]
+    hz = (len(ts) - 1) / (ts[-1] - ts[0]) if len(ts) > 2 else 0
+    report("PASS" if hz >= 60 else "FAIL", "touch-rate", f"{hz:.0f} reports/s while dragging")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--interactive", action="store_true")
+    a = ap.parse_args()
+    d = touch_static()
+    display_static()
+    ub = load_uibench()
+    t = ub.Touch()
+    ub.shell_ipc("idleInhibit", "true")
+    ub.shell_ipc("closeAll")
+    try:
+        ub.phase_quicksettings_once(t)   # wake the screen
+        display_vblank(ub, t)
+        backlight()
+        blank_cycles(ub, t)
+        if a.interactive and d:
+            interactive(d)
+    finally:
+        ub.shell_ipc("idleInhibit", "false")
+        t.close()
+    print(f"\n{fails} failure(s)")
+    raise SystemExit(fails)
+
+
+if __name__ == "__main__":
+    main()

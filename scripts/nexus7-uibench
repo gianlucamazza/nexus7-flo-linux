@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Repeatable UI benchmark for the Nexus 7 (runs on the tablet as root).
+
+    nexus7-uibench [--out DIR] [--phases settings,overview,quicksettings,typing]
+
+It starts nexus7-perfprobe, then drives the flo-shell session (Hyprland +
+Quickshell) with a virtual touchscreen (uinput, INPUT_PROP_DIRECT, same size
+as the panel) and a virtual keyboard (wtype), always with the same gestures
+and timings. Phase start times (uptime) go to a separate markers file so
+perf-analyze.py can report each phase on its own.
+
+Requirements on the tablet: py3-evdev, wtype, an unlocked flo-shell session
+of user "tablet". The shell's IPC is used to keep the screen awake
+(idleInhibit) and to check the state; the gestures are edge swipes plus
+GNOME Settings, so nothing gets toggled by accident.
+
+Only one virtual touchscreen is created per run: Hyprland 0.54 crashes when
+touch devices are added and removed in quick succession.
+"""
+import argparse
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+from evdev import AbsInfo, UInput, ecodes as e
+
+W, H = 1200, 1920
+USER = "tablet"
+UID = 10000
+def wayland_display():
+    socks = [os.path.basename(p) for p in sorted(glob.glob(f"/run/user/{UID}/wayland-*"))
+             if not p.endswith(".lock")]
+    return socks[-1] if socks else "wayland-1"
+
+
+ENV = {
+    "XDG_RUNTIME_DIR": f"/run/user/{UID}",
+    "WAYLAND_DISPLAY": wayland_display(),
+    "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{UID}/bus",
+    "XDG_CURRENT_DESKTOP": "Hyprland",
+    "XDG_SESSION_TYPE": "wayland",
+    # same renderer as the session (session/hyprland.conf)
+    "GSK_RENDERER": "cairo",
+}
+SHELL_CFG = "/usr/share/flo-shell/shell"
+
+
+def uptime():
+    with open("/proc/uptime") as f:
+        return f.read().split()[0]
+
+
+class Touch:
+    def __init__(self):
+        caps = {
+            e.EV_KEY: [e.BTN_TOUCH],
+            e.EV_ABS: [
+                (e.ABS_X, AbsInfo(0, 0, W - 1, 0, 0, 12)),
+                (e.ABS_Y, AbsInfo(0, 0, H - 1, 0, 0, 12)),
+                (e.ABS_MT_SLOT, AbsInfo(0, 0, 9, 0, 0, 0)),
+                (e.ABS_MT_TRACKING_ID, AbsInfo(0, 0, 65535, 0, 0, 0)),
+                (e.ABS_MT_POSITION_X, AbsInfo(0, 0, W - 1, 0, 0, 12)),
+                (e.ABS_MT_POSITION_Y, AbsInfo(0, 0, H - 1, 0, 0, 12)),
+            ],
+        }
+        self.ui = UInput(caps, name="nexus7-uibench-touch",
+                         input_props=[e.INPUT_PROP_DIRECT])
+        self.tid = 0
+        time.sleep(1.0)  # let libinput and the compositor pick the device up
+
+    def _pos(self, x, y):
+        self.ui.write(e.EV_ABS, e.ABS_MT_POSITION_X, int(x))
+        self.ui.write(e.EV_ABS, e.ABS_MT_POSITION_Y, int(y))
+        self.ui.write(e.EV_ABS, e.ABS_X, int(x))
+        self.ui.write(e.EV_ABS, e.ABS_Y, int(y))
+
+    def down(self, x, y):
+        self.tid += 1
+        self.ui.write(e.EV_ABS, e.ABS_MT_SLOT, 0)
+        self.ui.write(e.EV_ABS, e.ABS_MT_TRACKING_ID, self.tid)
+        self._pos(x, y)
+        self.ui.write(e.EV_KEY, e.BTN_TOUCH, 1)
+        self.ui.syn()
+
+    def move(self, x, y):
+        self._pos(x, y)
+        self.ui.syn()
+
+    def up(self):
+        self.ui.write(e.EV_ABS, e.ABS_MT_TRACKING_ID, -1)
+        self.ui.write(e.EV_KEY, e.BTN_TOUCH, 0)
+        self.ui.syn()
+
+    def swipe(self, x0, y0, x1, y1, dur=0.35, hz=100):
+        """Straight swipe at the touchscreen's real report rate (100 Hz)."""
+        steps = max(2, int(dur * hz))
+        self.down(x0, y0)
+        for i in range(1, steps + 1):
+            time.sleep(1.0 / hz)
+            self.move(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps)
+        time.sleep(1.0 / hz)
+        self.up()
+
+    def close(self):
+        self.ui.close()
+
+
+def as_user(*cmd, wait=True):
+    full = ["runuser", "-u", USER, "--", "env"] + [f"{k}={v}" for k, v in ENV.items()] + list(cmd)
+    if wait:
+        return subprocess.run(full, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return subprocess.Popen(full, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def shell_ipc(*args, capture=False):
+    cmd = ["runuser", "-u", USER, "--", "env"] + [f"{k}={v}" for k, v in ENV.items()] + \
+          ["quickshell", "ipc", "-p", SHELL_CFG, "call", "flo"] + [str(a) for a in args]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    return r.stdout if capture else r.returncode
+
+
+def shell_state():
+    try:
+        return json.loads(shell_ipc("state", capture=True) or "{}")
+    except (ValueError, subprocess.TimeoutExpired):
+        return {}
+
+
+def home(t):
+    """Tap the home bar: dismisses what is open (or opens the launcher)."""
+    t.down(600, H - 8); time.sleep(0.08); t.up()
+
+
+def phase_overview(t):
+    """With Settings open: long swipe up from the home bar to the overview,
+    then back to the app through the home bar, twice."""
+    for _ in range(2):
+        t.swipe(600, H - 8, 600, 600, 0.35)
+        time.sleep(1.5)
+        home(t)
+        time.sleep(1.5)
+
+
+def phase_quicksettings_once(t):
+    t.swipe(900, 6, 900, 1300, 0.35)              # status bar: pull down the sheet
+    time.sleep(1.2)
+    home(t)                                       # dismiss it
+    time.sleep(1.0)
+
+
+def phase_quicksettings(t):
+    for _ in range(2):
+        phase_quicksettings_once(t)
+        time.sleep(0.4)
+
+
+def phase_launcher(t):
+    for _ in range(2):
+        t.swipe(600, H - 8, 600, 1400, 0.30)      # short swipe: launcher
+        time.sleep(1.2)
+        home(t)
+        time.sleep(1.0)
+
+
+def phase_settings(t):
+    subprocess.run(["pkill", "-x", "gnome-control-c"])
+    # Start the binary directly: gtk-launch goes through D-Bus activation
+    # (DBusActivatable=true), which ignores the environment we pass (--gsk).
+    # GNOME Settings refuses to run unless XDG_CURRENT_DESKTOP contains GNOME
+    # (the session's launcher entry sets it the same way).
+    as_user("env", "XDG_CURRENT_DESKTOP=GNOME", "gnome-control-center", wait=False)
+    time.sleep(6.0)                               # startup cost lands in this phase
+    for _ in range(3):
+        t.swipe(800, 1600, 800, 500, 0.45)        # scroll the panel list
+        time.sleep(0.7)
+    for _ in range(2):
+        t.swipe(800, 500, 800, 1600, 0.45)
+        time.sleep(0.7)
+
+
+def phase_typing(t):
+    as_user("wtype", "-M", "ctrl", "f", "-m", "ctrl")   # Settings search
+    time.sleep(0.8)
+    as_user("wtype", "-d", "120", "wifi bluetooth display sound power")
+    time.sleep(1.0)
+    as_user("wtype", "-k", "Escape")
+    time.sleep(1.0)
+    subprocess.run(["pkill", "-x", "gnome-control-c"])
+    time.sleep(2.0)
+
+
+PHASES = {
+    "settings": phase_settings,
+    "overview": phase_overview,
+    "quicksettings": phase_quicksettings,
+    "launcher": phase_launcher,
+    "typing": phase_typing,
+}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default="/var/tmp/uibench")
+    ap.add_argument("--phases", default=",".join(PHASES))
+    ap.add_argument("--label", default=time.strftime("%H%M%S"))
+    ap.add_argument("--gsk", help="GSK_RENDERER for the apps started by the benchmark (e.g. gl, cairo)")
+    a = ap.parse_args()
+    if a.gsk:
+        ENV["GSK_RENDERER"] = a.gsk
+
+    st = shell_state()
+    if not st:
+        sys.exit(f"no flo-shell answering on {ENV['WAYLAND_DISPLAY']}: is the session running?")
+    if not st.get("displayOn", True):
+        shell_ipc("powerKey")
+        time.sleep(1.0)
+    if shell_state().get("locked"):
+        sys.exit("session is locked: unlock the tablet first")
+
+    os.makedirs(a.out, exist_ok=True)
+    probe_out = f"{a.out}/{a.label}.probe"
+    marks_out = f"{a.out}/{a.label}.marks"
+    phases = [p for p in a.phases.split(",") if p]
+    duration = 12 + 25 * len(phases)
+    probe = subprocess.Popen(["nexus7-perfprobe", str(duration), probe_out], stdout=subprocess.DEVNULL)
+    t = Touch()
+    # Keep the screen from blanking during the run (shell IPC) and make sure
+    # nothing is open, so the first phase starts from the same state.
+    shell_ipc("idleInhibit", "true")
+    shell_ipc("closeAll")
+    phase_quicksettings_once(t)
+    time.sleep(2.0)
+    with open(marks_out, "w") as m:
+        m.write(f"idle {uptime()}\n")
+        m.flush()
+        time.sleep(4.0)
+        for name in phases:
+            m.write(f"{name} {uptime()}\n")
+            m.flush()
+            PHASES[name](t)
+        m.write(f"end {uptime()}\n")
+    shell_ipc("idleInhibit", "false")
+    t.close()
+    probe.terminate()
+    probe.wait()
+    print(probe_out)
+    print(marks_out)
+
+
+if __name__ == "__main__":
+    main()

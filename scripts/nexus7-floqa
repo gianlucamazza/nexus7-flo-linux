@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+# QA helper for the flo-shell session (runs on the tablet as root): one virtual
+# touchscreen for the whole run (Hyprland 0.54 crashes when touch devices are
+# added and removed in quick succession). Screenshots go to /tmp/qa-<name>.png.
+# The wake step types the FLO_AUTH=dry test code on the lock pad; with real
+# PAM the tablet has to be unlocked by hand first.
+#   floqa step [step ...]
+#   steps: tap:x,y  swipe:x0,y0,x1,y1  sleep:s  ipc:fn[,arg]  shot:name  sh:command
+import json, subprocess, sys, time, importlib.machinery, importlib.util
+l = importlib.machinery.SourceFileLoader("ub", "/usr/local/sbin/nexus7-uibench")
+s = importlib.util.spec_from_loader("ub", l); ub = importlib.util.module_from_spec(s); l.exec_module(ub)
+U = ["runuser", "-u", "tablet", "--", "env"] + [f"{k}={v}" for k, v in ub.ENV.items()]
+QS = U + ["quickshell", "ipc", "-p", "/usr/share/flo-shell/shell", "call", "flo"]
+
+
+def state():
+    out = subprocess.run(QS + ["state"], capture_output=True, text=True, timeout=10).stdout
+    return json.loads(out or "{}")
+
+
+def wake():
+    """Screen on and unlocked (test code with FLO_AUTH=dry), nothing open."""
+    st = state()
+    if not st.get("displayOn", True):
+        subprocess.run(QS + ["powerKey"], timeout=10); time.sleep(1.0)
+    if state().get("locked"):
+        # Type the FLO_AUTH=dry test code on the lock screen pad like a person
+        # (authInput only works with FLO_DEV_INPUT=1). Portrait pad layout.
+        for x, y in ((196, 640), (310, 640), (422, 640), (196, 710), (310, 922)):
+            t.down(x, y); time.sleep(0.08); t.up(); time.sleep(0.35)
+        time.sleep(1.5)
+    subprocess.run(QS + ["closeAll"], timeout=10); time.sleep(0.5)
+
+
+t = ub.Touch()
+try:
+    wake()
+    for g in sys.argv[1:]:
+        k, _, v = g.partition(":")
+        a = v.split(",") if v else []
+        if k == "tap":
+            t.down(float(a[0]), float(a[1])); time.sleep(0.08); t.up(); time.sleep(0.6)
+        elif k == "swipe":
+            t.swipe(*map(float, a[:4]), 0.35); time.sleep(0.6)
+        elif k == "sleep":
+            time.sleep(float(a[0]))
+        elif k == "ipc":
+            subprocess.run(QS + a, timeout=10)
+            time.sleep(0.6)
+        elif k == "shot":
+            time.sleep(0.5)
+            subprocess.run(["timeout", "10"] + U + ["grim", "-s", "0.5", f"/tmp/qa-{v}.png"])
+            print(f"/tmp/qa-{v}.png", flush=True)
+        elif k == "sh":
+            subprocess.run(U + ["sh", "-c", v], timeout=30)
+        elif k == "wake":
+            wake()
+finally:
+    time.sleep(1.0)
+    t.close()
