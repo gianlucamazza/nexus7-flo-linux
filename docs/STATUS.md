@@ -523,3 +523,11 @@ thread, 0105 LVS7 sempre acceso), schedutil, tsens attivo, Wi-Fi attivo:
 Limite: non è separato quanto abbiano contato le correzioni di r18 e quanto
 la batteria carica. Alcuni blocchi della notte (01:16, r14) erano con
 batteria intorno al 70 %, quindi la batteria da sola non li spiega.
+
+r19 (r18 + limite USB 1,5 A nel DT + patch pannello 0015): avvio regolare,
+registro SMB345 0x01 = 0x44 già all'avvio (limite permanente). Spegnendo e
+riaccendendo lo schermo non compaiono più `cmd dma tx failed` né
+`SET_DISPLAY_OFF/ENTER_SLEEP_MODE failed`; restano avvisi `wait for video done
+timed out` non bloccanti. Mesa 26.3.0 per armv7: rusticl e driver che
+richiedono Rust (panfrost, etnaviv, lima, vc4, v3d, tegra) tolti dalla ricetta
+locale in `temp/mesa`.
