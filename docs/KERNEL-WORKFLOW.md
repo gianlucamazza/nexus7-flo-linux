@@ -65,3 +65,11 @@ scripts/pmb -y build --arch armv7 linux-postmarketos-qcom-apq8064
   `crashdec/build`.
 - **Journal:** persistent, synced every 2 s. After a hang, copy it from TWRP
   (procedure in the project memory/STATUS).
+
+## Package versions from envkernel
+
+`pmbootstrap build --envkernel` names the package `7.2_p<timestamp>-r0`.
+apk treats `7.2_p…` as newer than any `7.2-rN`, so after an envkernel kernel
+a clean `7.2-rN` build is a downgrade for apk. Always install kernels with the
+`install-rN-remote.sh` script, which passes the file explicitly (`apk add
+<file>` accepts downgrades), never with `apk upgrade`.

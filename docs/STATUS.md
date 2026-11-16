@@ -615,3 +615,17 @@ flo-shell (Hyprland 0.54.3, Quickshell 0.3.2) sul tablet:
 - Hyprland 0.54 va in crash se un touchscreen virtuale viene aggiunto e rimosso in rapida successione. Lo strumento di collaudo ora ne usa uno solo.
 
 Phosh rimosso su richiesta dell'utente (99 pacchetti, circa 160 MB). greetd usa il greeter di flo-shell; la configurazione di Phrog è salvata in `/var/tmp/flo-pkgs/greetd-config.toml.phrog` e il world precedente in `/var/tmp/flo-pkgs/world.before-phosh-removal`. Restano installati, perché servono: upower, gnome-control-center, gnome-keyring, adwaita-icon-theme, ca-certificates, dconf, libnotify. Avvio completo verificato fino al greeter con r21.
+
+### Errore DSI alla variazione di luminosità: diagnosi (r22)
+
+`dsi_err_worker: status=5` = `DSI_ERR_STATE_TIMEOUT | DSI_ERR_STATE_FIFO`
+(dsi_host.c; `DSI_ERR_STATE_ACK` vale 0 e non può mai comparire). Ogni
+scrittura DCS di luminosità in video mode passa da `dsi_wait4video_eng_busy`,
+che aspetta l'interruzione VIDEO_DONE fino a 70 ms; sul DSI v2 dell'APQ8064
+l'attesa scade (`wait for video done timed out`), il comando parte a metà
+fotogramma e la coda dei comandi va in errore. Inviare la luminosità in
+low-power (r22) non cambia nulla: modifica tolta dal ramo. La luminosità
+funziona e lo schermo non mostra difetti; la correzione giusta è nel driver
+DSI (attesa della fine del fotogramma su DSI v2) ed è aperta.
+
+r23 = r21 + `CONFIG_BT_QCOMSMD=m` (Bluetooth via WCNSS SMD); bluez installato.
