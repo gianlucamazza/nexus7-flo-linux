@@ -547,3 +547,18 @@ percepito viene soprattutto da Phosh (GTK3, disegnato dalla CPU). Reso
 predefinito `GSK_RENDERER=gl` (`/etc/environment.d/90-nexus7-graphics.conf`,
 drop-in di greetd); tolto `WLR_RENDERER=pixman`, che phoc ignorava (usa GLES).
 `kworker` della devfreq GPU: 1,5 ms ogni 3 s, trascurabile.
+
+### Inviluppo termico, prova a runtime (2026-11-16)
+
+Soglia passiva portata a 65 °C via `trip_point_0_temp` (come Android, che
+limita da 60 °C): 7-Zip 4 thread compressione 2080 → 1225 MIPS,
+decompressione 3649 → 1821; picco comunque 79 °C (step_wise reagisce in
+ritardo). Prestazioni dimezzate sotto carico prolungato senza un beneficio
+dimostrato sulla stabilità (r18/r19 stabili a 85 °C): soglia riportata a
+85 °C, nessun r20 termico. Le animazioni GNOME erano già disattivate.
+
+Installati sul tablet da Alpine: hyprland 0.54.3, aquamarine 0.12.0, wvkbd
+0.21, brightnessctl. In compilazione: quickshell 0.3.2 e cli11 (`temp/`);
+ricette locali `temp/flo-shell` e `temp/flo-sessiond` da `git archive` del
+repository flo-shell. Registratore leggero `/usr/local/sbin/nexus7-soak`
+(unità transitoria `nexus7-soak`, file `/var/tmp/soak-<build>.log`).
