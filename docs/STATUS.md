@@ -562,3 +562,19 @@ Installati sul tablet da Alpine: hyprland 0.54.3, aquamarine 0.12.0, wvkbd
 ricette locali `temp/flo-shell` e `temp/flo-sessiond` da `git archive` del
 repository flo-shell. Registratore leggero `/usr/local/sbin/nexus7-soak`
 (unità transitoria `nexus7-soak`, file `/var/tmp/soak-<build>.log`).
+
+### GPU: blocco con GTK4, metodo (2026-11-16, mezzogiorno)
+
+Con Mesa 26.3.0 appena installata e `GSK_RENDERER=gl` predefinito, la GPU si
+è bloccata (`hangcheck detected gpu lockup`, `offending task:
+gnome-control-c`, poi `gpu hw init failed: -22`); prima del blocco phoc
+falliva `gbm_bo_get_fd_for_plane` perché era partito con la Mesa 26.2.6 in
+memoria. `GSK_RENDERER=cairo` ripristinato, riavvio. Dopo il riavvio, con
+phoc su 26.3.0, Impostazioni con `GSK_RENDERER=gl` non ha bloccato la GPU
+(uso breve): la causa più probabile è la miscela di librerie, non provata.
+
+Strumenti: regola udev `70-nexus7-devcoredump.rules` + script
+`nexus7-save-devcoredump` salvano ogni devcoredump in
+`/var/lib/nexus7-devcoredump/`; `crashdec` di Mesa compilato sul portatile.
+r20 in compilazione: punta del fork (correzioni A320) con revert di
+a66d59b2a223 (TLB invalidation dal command stream) + tutte le patch di r19.

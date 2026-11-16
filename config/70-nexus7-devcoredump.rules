@@ -1,0 +1,2 @@
+# Save every GPU/driver crash dump (devcoredump) to /var/lib/nexus7-devcoredump (2026-11-16).
+ACTION=="add", SUBSYSTEM=="devcoredump", RUN+="/usr/local/sbin/nexus7-save-devcoredump %p"

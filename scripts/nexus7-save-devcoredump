@@ -1,0 +1,10 @@
+#!/bin/sh
+# Called by udev with the devcoredump device path (%p): copy the dump to disk
+# and release it, so GPU hangs can be decoded later with Mesa's crashdec.
+set -eu
+dir=/var/lib/nexus7-devcoredump
+mkdir -p "$dir"
+out="$dir/$(date +%Y%m%d-%H%M%S)-${1##*/}.bin"
+cat "/sys$1/data" > "$out"
+echo 1 > "/sys$1/data"
+logger -t nexus7-devcoredump "saved $out"
