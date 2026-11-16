@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Incremental kernel builds for flo with pmbootstrap envkernel.
+#
+#   scripts/flo-kernel build     # make in ../linux-flo (.output)
+#   scripts/flo-kernel package   # pmbootstrap build --envkernel (package from .output)
+#   scripts/flo-kernel patches   # regenerate pmaports patches from the git branch
+#
+# The tree keeps its objects between runs, so a DT or driver change rebuilds
+# in minutes. The config lives in pmaports (config-postmarketos-qcom-apq8064.armv7).
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+KTREE=${KTREE:-../linux-flo}
+PKG=linux-postmarketos-qcom-apq8064
+PKGDIR="$ROOT/upstream/pmaports/device/testing/$PKG"
+JOBS=${JOBS:-$(nproc)}
+
+envk() {
+	cd "$KTREE"
+	export pmbootstrap_dir="$ROOT/scripts/envkernel-shim"
+	# envkernel.sh defines "make" as an alias that runs in the native chroot
+	shopt -s expand_aliases
+	set +u
+	# shellcheck disable=SC1091
+	source "$ROOT/upstream/pmbootstrap/helpers/envkernel.sh"
+}
+
+case "${1:-}" in
+build)
+	envk
+	mkdir -p .output
+	cp "$PKGDIR/config-postmarketos-qcom-apq8064.armv7" .output/.config
+	ver="$(sed -n 's/^pkgrel=//p' "$PKGDIR/APKBUILD" | awk '{print $1+1}')-postmarketos-qcom-apq8064"
+	# eval: the alias is only expanded in code parsed after it was defined
+	eval make olddefconfig
+	eval make -j"$JOBS" KBUILD_BUILD_VERSION="$ver"
+	;;
+package)
+	"$ROOT/scripts/pmb" -y build --envkernel "$PKG"
+	;;
+patches)
+	cd "$KTREE"
+	base=${BASE:-flo/base}
+	git format-patch --no-numbered --zero-commit -o "${OUT:-$ROOT/reports/kernel-patches}" "$base"..HEAD
+	;;
+*)
+	sed -n '2,10p' "$0"; exit 1 ;;
+esac
