@@ -1,7 +1,8 @@
 # Nexus 7 2013 Wi-Fi (flo) hardware integration matrix, Linux 7.2 apq8064-mainline
 
-Nothing in this document was tested on the tablet. Every row is the result of
-reading sources; the patches were only applied and compiled to a dtb.
+This matrix was originally an offline source review; the patches were only
+applied and compiled to a dtb. For the current sensor investigation and
+read-only tablet evidence, see [SENSORS.md](SENSORS.md).
 
 ## Sources
 
@@ -35,7 +36,7 @@ driver work, **(d)** not feasible in mainline today.
 | GPIO 77 "ext_3p3v" in current DT | — | TLMM 77 | V `board-flo.c` (`apq8064_device_ext_3p3v_vreg` commented out), gpiomux as above | — | — | Bug in the current board file; patch 0001 | Low |
 | CPU idle (SPC) | SAW2 v1.1 | — | V `board-flo.c` `msm_spm_data[]`, `spm_power_collapse_without_rpm[]` | `cpuidle-qcom-spm.c`, `drivers/soc/qcom/spm.c` | `ARM_QCOM_SPM_CPUIDLE=y` | Workaround (b) patch 0002; real fix (c) | Low |
 | Suspend to RAM | — | — | — | `arch/arm/mach-qcom` holds only `platsmp.c`; nothing registers platform suspend ops | `SUSPEND=y` | (d) today: s2idle only | — |
-| IMU / compass / light sensor | **Not named in any vendor source** | Unknown; handled by the DSPS sensor core | V `board-flo.c` `apq8064_init_dsps()`, `devices-8064.c` `msm_dsps_device_8064`; D `init.flo.rc` (`sensors.qcom`, `/persist/lightsensor/AL3010_Config.ini`), `proprietary-blobs.txt` (`dsps.*`) | Drivers exist for likely parts, but there is nothing to bind them to | `INV_MPU6050_*=m`, `AK8975=y`, `AL3010` not set | Unknown until the bus is scanned; patch 0007 enables GSBI2 for that | Low-medium, experimental |
+| IMU / compass / light sensor | **Not named in any vendor source** | Unknown; handled by the DSPS sensor core | V `board-flo.c` `apq8064_init_dsps()`, `devices-8064.c` `msm_dsps_device_8064`; D `init.flo.rc` (`sensors.qcom`, `/persist/lightsensor/AL3010_Config.ini`), `proprietary-blobs.txt` (`dsps.*`) | Drivers exist for likely parts, but there is nothing to bind them to | `INV_MPU6050_*=m`, `AK8975=y`, `AL3010` not set | (c) DSPS driver/transport bring-up; see [SENSORS.md](SENSORS.md). Patch 0007 superseded; do not scan inferred buses | Unresolved ownership/power; not validated |
 | NFC | Broadcom BCM2079x | GSBI1 I2C 0x77; IRQ TLMM 32; WAKE PM8921 GPIO 8; VEN PM8921 GPIO 9 | V `board-flo.c` `i2c_bcm2079x[]`, `bcm2079x_pdata`, `config_nfc_gpio()` | None (`drivers/nfc` has no Broadcom I2C NCI driver) | `NFC` not set | (d) / (c) new driver | — |
 | SlimPort / HDMI out | Analogix ANX7808 | GSBI1 I2C 0x39 (0x72 >> 1); cable detect TLMM 7; INT TLMM 44; power-down PM8921 GPIO 2; reset PM8921 GPIO 1; 27 MHz clock on TLMM 50 (`gp_clk_1b`); 1.05 V core "slimport_1p0" = L28 | V `board-flo.c` `anx7808_pdata`, `i2c_anx7808_info[]`, `anx7808_switch_onoff()`, `add_i2c_anx7808_device()` (PHY tuning values); `drivers/misc/slimport_anx7808/slimport.c` (`gp_clk_b1` 27 MHz); `board-flo-regulator.c` `VREG_CONSUMERS(L28)` | `analogix-anx78xx.c` has `analogix,anx7808`, but no clock consumer, and it reserves 0x39 itself as a dummy address; no flo PHY tuning | `DRM_ANALOGIX_ANX78XX=m`, `DRM_MSM_HDMI=y` | (c) | Not drafted |
 | Rear camera | OmniVision OV5693 (id 0x5690) + VCM actuator | GSBI4 I2C (TLMM 10/11); sensor slave address 0x20 in 8-bit form (7-bit 0x10), actuator 0x11; MCLK TLMM 5; power-down PM8921 GPIO 25; reset PM8921 GPIO 31; 2 data lanes; supplies cam_vdig 1.8 V (L23), cam_vio (LVS5), cam_vana 2.8 V (L8), cam_vaf 2.8 V (L16); mount angle 90 | V `board-flo-camera.c` `ov5693_slave_info`, `apq8064_back_cam_gpio[]`, `CAM1_PWDN`, `CAM1_RSTN`, `ov5693_csi_lane_params`, `apq_8064_back_cam_vreg[]`, `ov5693_init_params`; `board-flo-regulator.c` consumers "4-0040" | `drivers/media/i2c/ov5693.c` exists; **no CSI/VFE host driver for APQ8064** (camss bindings in this tree start at msm8916) | `VIDEO_OV5693` not set | (d) | — |
@@ -133,7 +134,8 @@ LVS4 have none, so they are switched off after boot. Patch 0011 restores both.
 
 ## Patches
 
-Apply in numeric order; all touch `qcom-apq8064-asus-nexus7-flo.dts` only.
+Historical drafts; patch 0007 is superseded and must not be applied.
+The remaining patches are ordered numerically; all touch `qcom-apq8064-asus-nexus7-flo.dts` only.
 
 | Patch | Topic | Risk | Standalone? |
 |---|---|---|---|
@@ -143,7 +145,7 @@ Apply in numeric order; all touch `qcom-apq8064-asus-nexus7-flo.dts` only.
 | 0004 | Hall / lid switch | Low-medium | needs 0003 (context) |
 | 0005 | EEPROM read-only | Low | yes |
 | 0006 | WCD9310 codec + sound card (headphones) | Medium | needs 0004 |
-| 0007 | GSBI2 I2C on, for sensor discovery | Experimental | yes |
+| 0007 | GSBI2 I2C probe — superseded by SENSORS.md | Do not apply | — |
 | 0008 | XOADC reference L14 | HIGH RISK (new regulator) | yes |
 | 0009 | USB host: ID extcon + SMB345 VBUS | HIGH RISK | needs 0001, 0004 |
 | 0010 | Notification LED | HIGH RISK | yes |

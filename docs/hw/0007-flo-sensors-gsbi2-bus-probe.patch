@@ -1,3 +1,7 @@
+SUPERSEDED 2026-11-16: DO NOT APPLY OR FOLLOW THE PROBING PROCEDURE BELOW.
+See docs/hw/SENSORS.md for firmware, ownership and memory findings.
+Retained as historical investigation only; sensor power/ownership is unverified.
+
 ARM: dts: qcom: apq8064-asus-nexus7-flo: enable GSBI2 I2C to look for the sensors
 
 Risk: LOW-MEDIUM, EXPERIMENTAL. The bus assignment is an inference, not a

@@ -1,0 +1,76 @@
+{
+  "architecture": "ARM ELF32 little-endian",
+  "ddr_memory_check": "overlaps-system-ram",
+  "files": {
+    "dsps.b00": {
+      "sha256": "8c405d24141acbd0768613cdf944ee3e266a6e1405feaa79c0fdaacb91bf7a7b",
+      "size": 244
+    },
+    "dsps.b01": {
+      "sha256": "20672a9f39d16b7522d02e1650cee03c8c11b56513920ce5df57822ac3b17227",
+      "size": 6560
+    },
+    "dsps.b02": {
+      "sha256": "153644b2fa39bd855bbfde0be52999cd302c09a114874228b5d2ced8c7aa124c",
+      "size": 116200
+    },
+    "dsps.b03": {
+      "sha256": "220efc1f8dcd63e4c8938eba19922669a932221eb136d4642d15c7623b31e6ad",
+      "size": 62020
+    },
+    "dsps.b04": {
+      "sha256": "7c421dd145edb3d1792458c19ac519208807d91831af08008f31d0ec7bd895ae",
+      "size": 6720
+    },
+    "dsps.b05": {
+      "sha256": "0859cca05b1f91a8848c07670a15468beb97b9ce80d6ed9739c2ccfb75ba1690",
+      "size": 13996
+    },
+    "dsps.mdt": {
+      "sha256": "a4b5e54c414e53e30869f41a2374d9cc1554f6648ae39f155fd39a1c710f91f4",
+      "size": 6804
+    }
+  },
+  "load_segments": [
+    {
+      "file_size": 116200,
+      "index": 2,
+      "memory_size": 157644,
+      "physical_address": 301989888,
+      "virtual_address": 0,
+      "window": "tcm-code"
+    },
+    {
+      "file_size": 62020,
+      "index": 3,
+      "memory_size": 64916,
+      "physical_address": 2413821952,
+      "virtual_address": 2413821952,
+      "window": "ddr"
+    },
+    {
+      "file_size": 6720,
+      "index": 4,
+      "memory_size": 15476,
+      "physical_address": 302252032,
+      "virtual_address": 163840,
+      "window": "tcm-buffer"
+    },
+    {
+      "file_size": 13996,
+      "index": 5,
+      "memory_size": 15792,
+      "physical_address": 310378496,
+      "virtual_address": 310378496,
+      "window": "pipe"
+    }
+  ],
+  "overlapping_system_ram": [
+    [
+      2406481920,
+      4294967295
+    ]
+  ],
+  "schema_version": 1,
+  "scope": "Structural validation only; not signature verification or boot authorization."
+}
