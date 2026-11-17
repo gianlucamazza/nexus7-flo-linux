@@ -134,6 +134,36 @@ la notifica VBUS esistente non può quindi avviare BC1.2 al boot senza `g1`.
    riavvio e sorgenti SDP/DCP note. Verificare corrente, tipo, ICL reale,
    bilanciamento PHY e assenza di timeout a ogni passaggio.
 
+### Risultato del quinto build e nuova diagnosi
+
+Il quinto build conserva DCP/proprietario a 1,2 A dopo lo sgancio di `g1`,
+ma non dopo la riassociazione dell'intero controller senza gadget. La
+kretprobe di `ci_otg_role()` restituisce `0` (host) all'inizio di quel
+probe; il worker OTG arriva al rilevatore senza gadget solo dopo il
+passaggio a gadget. La seconda riproduzione perde VBUS e lascia ULPI in
+`-ETIMEDOUT`, confermato anche dalla lettura debugfs dei registri ULPI.
+Un riavvio caldo non ha recuperato il PHY. R29 è stato ripristinato e,
+con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
+
+1. Verificare la causa del ruolo host iniziale: la DT flo guida GPIO77
+   come uscita di `ext_3p3v`, mentre il kernel Android flo lo usa come
+   ingresso USB ID. Il commit isolato `df2d35bb2` rimuove il regolatore;
+   il DTB compila, ma non è stato collaudato sul tablet. Non abilitare
+   ancora il boost host da 5 V.
+2. Tracciare OTGSC ID/BSV e stato GPIO77 dal probe al primo evento VBUS
+   con la DT corretta. Richiedere ruolo gadget stabile con caricatore e
+   nessun ingresso spurio in EHCI host prima di integrare il ramo BC1.2.
+3. Analizzare il reset del PHY dopo la transizione host→gadget: la
+   riassociazione del solo gadget e il reboot caldo hanno entrambi lasciato
+   ULPI in timeout. La futura correzione deve recuperare il bus ULPI senza
+   distacco fisico e non lasciare una sorgente alta dopo perdita VBUS.
+4. Distinguere la capacità della sorgente dallo stato AICL. Sullo stesso
+   alimentatore `STAT_E=0x92` accompagnava circa −210 mA a schermo acceso;
+   dopo un nuovo ciclo di negoziazione `STAT_E=0x84` accompagnava
+   +389…+404 mA. Confermare la decodifica dei registri e misurare la
+   tensione/corrente d'ingresso prima di definire una politica di
+   riavvio AICL, evitando un semplice ritardo temporale.
+
 ## Fonti primarie
 
 - Kernel Linux locale: `drivers/power/supply/smb347-charger.c`,
