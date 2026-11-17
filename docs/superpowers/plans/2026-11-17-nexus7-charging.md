@@ -40,7 +40,11 @@ display acceso, ma non dimostra che l'alimentatore corrente possa fornire
    alta solo dopo una classificazione DCP/CDP affidabile. Il valore DT
    `summit,usb-current-limit-microamp = <1500000>` non è una policy completa;
    va sostituito con un limite hardware massimo distinto dal limite operativo
-   della sorgente.
+   della sorgente. Per SDP, distinguere anche lo stato prima/dopo la
+   configurazione USB: la modalità USB 100/500 mA è comandata da `CMD_B`
+   (bit 1) nel driver Android SMB347, mentre il bit 0 seleziona la modalità
+   ad alta corrente. La DT a 500 mA nel ramo host è soltanto una riduzione
+   del limite iniziale; non prova il rispetto del budget SDP preconfigurazione.
 
 ## Implementazione e prove host
 
@@ -87,3 +91,4 @@ display acceso, ma non dimostra che l'alimentatore corrente possa fornire
 - [Driver Android flo MSM OTG](https://android.googlesource.com/kernel/msm/+/android-6.0.1_r0.81/drivers/usb/otg/msm_otg.c): la classificazione del PHY viene inoltrata al SMB345; INOK è soltanto presenza.
 - [Board Android APQ8064](https://android.googlesource.com/kernel/msm/+/3be1a0852894880c46ec0fc74a3a61c2bb5799a0/arch/arm/mach-msm/board-apq8064.c): dichiara il PHY SNPS a 28 nm.
 - [Driver Android grouper SMB347](https://android.googlesource.com/kernel/tegra/+/c77d6685da58e3434f47ffd29eb2b3c16e0c262a/drivers/power/smb347-charger.c): i codici APSD 1–4 sono definiti; il 6 non è classificato in questa fonte.
+- [Documentazione gadget Linux](https://docs.kernel.org/driver-api/usb/gadget.html) e [test USB-IF](https://usb.org/sites/default/files/3.2%20Interoperability%20Testing%20v1.03%20w%20USB%20Type-C.pdf): la corrente SDP dipende dalla configurazione USB; una porta USB 2.0 non configurata è limitata a 100 mA.
