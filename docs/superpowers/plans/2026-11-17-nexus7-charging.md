@@ -223,7 +223,8 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    pin cambiano mentre l'IRQ è disabilitato. KUnit RED/GREEN 8/8 e
    checkpatch passano; la revisione statica indipendente ha verificato i
    tre rilievi precedenti senza trovarne altri bloccanti. La build ARM
-   finale e le prove native restano da completare. In particolare servono
+   finale è terminata con codice 0 e ha generato `zImage` e moduli; le
+   prove native restano da completare. In particolare servono
    boot senza gadget, bind/unbind ripetuti, distacco/riattacco fisico,
    SDP/CDP/DCP e cambio di ruolo con lockdep, verificando OTGSC, ULPI,
    sorgente pubblicata, ICL reale e batteria prima di integrare la patch
