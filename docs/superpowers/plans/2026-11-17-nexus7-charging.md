@@ -188,6 +188,11 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    +389…+404 mA. Confermare la decodifica dei registri e misurare la
    tensione/corrente d'ingresso prima di definire una politica di
    riavvio AICL, evitando un semplice ritardo temporale.
+   In una lettura successiva del kernel r29, il chip e regmap concordano su
+   `CFG_CURRENT_LIMIT=0x44`, ma `STAT_E=0x91` e la batteria guadagna solo
+   circa +124…+131 mA a DPMS spento. Il disallineamento della regcache era
+   reale in una fase precedente, ma non spiega da solo la corrente bassa
+   attuale. Non inferire la corrente di ingresso dal registro ICL.
 
 ## Fonti primarie
 
