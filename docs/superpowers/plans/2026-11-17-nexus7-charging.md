@@ -31,14 +31,27 @@ display acceso, ma non dimostra che l'alimentatore corrente possa fornire
    fasi. Portarle nel ciclo di vita del controller/PHY richiede coordinare
    l'enumerazione gadget: una semplice lettura del registro del caricatore
    non sostituisce la misura sulle linee D+/D−.
-   Nel kernel corrente `ci_udc_vbus_session()` chiama sincronicamente
-   `CI_HDRC_CONTROLLER_VBUS_EVENT` prima di connettere il gadget; il glue
-   Qualcomm `ci_hdrc_msm_notify_event()` può quindi avviare la misura BC1.2
-   in questa fase. Il risultato deve diventare una power supply del PHY o
-   controller con tipo e corrente disponibili, collegata al SMB345 tramite
-   `power-supplies` e `external_power_changed`. Verificare in prova che il
-   PHY sia alimentato durante l'evento e che la modalità ULPI normale sia
-   ripristinata anche sugli errori.
+   Analisi del lifecycle ChipIdea: `ci_udc_vbus_session()` chiama
+   `CI_HDRC_CONTROLLER_VBUS_EVENT` **prima** di `ci_hdrc_gadget_connect()`;
+   quest'ultima chiama `hw_device_reset()`, che genera
+   `CI_HDRC_CONTROLLER_RESET_EVENT` e solo allora esegue `phy_init()` e
+   `phy_power_on()`. L'evento VBUS esistente non garantisce quindi un PHY
+   alimentato; non eseguire lì letture ULPI. Collocare la misura dopo il
+   reset/accensione PHY e prima di `hw_device_state()` e del pull-up gadget,
+   oppure rifattorizzare esplicitamente la proprietà del PHY sull'evento
+   VBUS con init/power-on e off bilanciati. Coprire anche il caso senza
+   gadget driver associato, il distacco e un reset ripetuto: nessun conteggio
+   PHY perso e nessun limite alto ereditato dalla connessione precedente.
+   Il percorso attach corrente ignora il ritorno di `hw_device_reset()`:
+   propagare un eventuale errore prima di presentare il gadget o pubblicare
+   una classificazione; verificare che il riferimento runtime-PM sia
+   bilanciato. La notifica di VBUS può provenire dal worker OTG, ma anche
+   dal probe o dalla scrittura del ruolo: il rilevatore deve poter dormire
+   solo nei contesti effettivamente coperti da queste chiamate.
+   Il risultato deve diventare una power supply del PHY o controller con
+   tipo e corrente disponibili, collegata al SMB345 tramite `power-supplies`
+   e `external_power_changed`. Ripristinare sempre la modalità ULPI normale
+   dopo errore o completamento.
 2. Confermare con schema, DT storico e letture GPIO quale pin è INOK (storico
    TLMM GPIO23) e se STAT del caricatore è cablato. Non collegare INOK
    all'handler `smb347_interrupt`: quell'handler legge gli interrupt del chip
