@@ -1,11 +1,13 @@
 #!/bin/sh
 # Read-only battery and charger snapshot for the Nexus 7 (flo).
 echo "kernel: $(uname -v)"
+echo "time: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 for d in /sys/class/power_supply/*; do
     [ -e "$d/type" ] || continue
     echo "== $(basename "$d") ($(cat "$d/type"))"
-    for f in status online present capacity voltage_now current_now charge_type \
-             temp health constant_charge_current constant_charge_voltage; do
+    for f in status online present capacity voltage_now current_now \
+             current_max usb_type charge_type temp health \
+             constant_charge_current constant_charge_voltage; do
         [ -r "$d/$f" ] && printf '   %s=%s\n' "$f" "$(cat "$d/$f" 2>/dev/null)"
     done
 done
@@ -24,7 +26,11 @@ for r in sorted(names):
     try: print("   smb345 reg 0x%02x = 0x%02x  (%s)" % (r, rd(r), names[r]))
     except OSError as e: print("   smb345 reg 0x%02x: %s" % (r, e))
 PY
+elif [ -r /sys/kernel/debug/regmap/0-006a/registers ]; then
+    echo "== SMB345 regmap (verify hardware with REGCACHE_NONE kernel)"
+    awk '$1 ~ /^(00|01|02|03|04|06|09|30|31|39|3b|3c|3d|3e|3f):$/ { print "   " $0 }' \
+        /sys/kernel/debug/regmap/0-006a/registers
 else
-    echo "   smb345: driver bound or i2c-dev unavailable; see power_supply above"
+    echo "   smb345: register view unavailable; see power_supply above"
 fi
 dmesg | grep -iE "smb34|bq27" | tail -5
