@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Capture a short, guarded brightness reproduction without changing UI/auth state.
+
+Run on the tablet as root with an unlocked session and quick settings open.
+The caller performs the gesture. PPM avoids PNG compression during capture.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import pwd
+import subprocess
+import time
+
+
+class CaptureDenied(RuntimeError):
+    pass
+
+
+def require_ready(state):
+    if state.get('locked') is not False or state.get('displayOn') is not True:
+        raise CaptureDenied('session locked, display off, or session state unknown')
+    if state.get('quickSettings') is not True:
+        raise CaptureDenied('quick settings must already be open')
+
+
+def run_capture(destination, backend, frames=12, interval=.25):
+    if not 1 <= frames <= 60 or not 0 <= interval <= 5:
+        raise ValueError('frames must be 1..60 and interval 0..5 seconds')
+    require_ready(backend.state())
+    destination = Path(destination)
+    destination.mkdir(mode=0o700, parents=True, exist_ok=False)
+    with (destination / 'samples.jsonl').open('w') as output:
+        for i in range(frames):
+            started = time.monotonic()
+            state = backend.state()
+            require_ready(state)
+            layers = backend.layers()
+            frame = destination / f'frame-{i:03d}.ppm'
+            backend.capture(frame)
+            try:
+                require_ready(backend.state())
+            except CaptureDenied:
+                frame.unlink(missing_ok=True)
+                raise
+            output.write(json.dumps({'monotonic': started, 'finished': time.monotonic(),
+                                     'frame': frame.name, 'state': state, 'layers': layers}) + '\n')
+            output.flush()
+            if i + 1 < frames:
+                time.sleep(max(0, interval - (time.monotonic() - started)))
+
+
+class NativeBackend:
+    def __init__(self, user, display):
+        runtime = f'/run/user/{pwd.getpwnam(user).pw_uid}'
+        instances = [p.name for p in (Path(runtime) / 'hypr').glob('*')
+                     if (p / '.socket.sock').is_socket()]
+        if len(instances) != 1:
+            raise CaptureDenied('exactly one active Hyprland instance is required')
+        self.prefix = ['runuser', '-u', user, '--', 'env', 'XDG_RUNTIME_DIR=' + runtime,
+                       'WAYLAND_DISPLAY=' + display, 'HYPRLAND_INSTANCE_SIGNATURE=' + instances[0]]
+
+    def command(self, *args):
+        return subprocess.check_output(self.prefix + list(args), text=True, timeout=8)
+
+    def state(self):
+        return json.loads(self.command('flo-shell', 'msg', 'state'))
+
+    def layers(self):
+        return json.loads(self.command('hyprctl', '-j', 'layers'))
+
+    def capture(self, path):
+        # Directory belongs to root; create the file as the session user in RAM
+        # then stream through stdout to the root-owned evidence file.
+        with path.open('wb') as output:
+            subprocess.run(self.prefix + ['grim', '-t', 'ppm', '-s', '1', '-'],
+                           stdout=output, check=True, timeout=8)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--frames', type=int, default=12)
+    parser.add_argument('--interval', type=float, default=.25)
+    parser.add_argument('--user', default='tablet')
+    parser.add_argument('--display', default='wayland-1')
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        parser.error('run as root on the tablet')
+    try:
+        run_capture(args.out, NativeBackend(args.user, args.display), args.frames, args.interval)
+    except (CaptureDenied, ValueError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+        parser.exit(1, str(error) + '\n')
+    print(args.out)
+
+
+if __name__ == '__main__':
+    main()
