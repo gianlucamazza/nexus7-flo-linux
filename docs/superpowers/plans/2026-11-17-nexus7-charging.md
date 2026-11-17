@@ -66,6 +66,11 @@ display acceso, ma non dimostra che l'alimentatore corrente possa fornire
    (bit 1) nel driver Android SMB347, mentre il bit 0 seleziona la modalità
    ad alta corrente. La DT a 500 mA nel ramo host è soltanto una riduzione
    del limite iniziale; non prova il rispetto del budget SDP preconfigurazione.
+   Prima di usare l'indice USB ICL 4, risolvere la discrepanza tra il driver
+   Android flo (lo tratta come 1,2 A) e `icl_tbl[SMB345]` Linux (lo tratta
+   come 1,5 A). La prova BC1.2 identifica il tipo di sorgente, non corregge
+   una tabella di corrente sbagliata. Usare un valore superiore alla capacità
+   classificata soltanto dopo una mappatura verificata sul chip.
 
 ## Implementazione e prove host
 
