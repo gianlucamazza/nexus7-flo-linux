@@ -182,6 +182,11 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    del controller: `hw_device_reset()` avviene prima della notifica glue,
    perciò una mutex nel solo callback non serializzerebbe il reset con la
    lettura ULPI. Questo è il confine di concorrenza da progettare e testare.
+   Il commit host `5da3b7e0f` chiude il solo percorso di unbind: durante
+   `STOPPED_EVENT` conserva il tipo/budget se VBUS e ruolo gadget persistono,
+   altrimenti pubblica offline, e non misura il PHY nel mezzo della pulizia.
+   KUnit RED/GREEN 5/5 e checkpatch della diff passano. Rimane da progettare
+   e provare la misura senza gadget al boot, serializzata con il reset.
 4. Distinguere la capacità della sorgente dallo stato AICL. Sullo stesso
    alimentatore `STAT_E=0x92` accompagnava circa −210 mA a schermo acceso;
    dopo un nuovo ciclo di negoziazione `STAT_E=0x84` accompagnava
