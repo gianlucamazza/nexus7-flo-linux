@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Capture a short DSI/MDP trace without changing the display or brightness.
+
+Run as root on the tablet. Start the brightness reproduction separately during
+the requested interval. The trace uses a private tracefs instance and restores
+it on exit, including when interrupted.
+"""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+
+TRACEFS = Path("/sys/kernel/tracing")
+FUNCTIONS = (
+    "mdp4_crtc_vblank_irq",
+    "dsi_host_irq",
+    "msm_dsi_manager_wait_for_vblank",
+    "msm_dsi_manager_cmd_xfer",
+    "msm_dsi_host_xfer_prepare",
+    "msm_dsi_host_cmd_tx",
+    "msm_dsi_host_cmd_xfer_commit",
+    "msm_dsi_host_xfer_restore",
+)
+EVENTS = (
+    "drm/drm_vblank_event",
+    "irq/irq_handler_entry",
+    "irq/irq_handler_exit",
+)
+
+
+def write(path, value):
+    path.write_text(value + "\n")
+
+
+def capture(out, seconds, root=TRACEFS):
+    if not 1 <= seconds <= 60:
+        raise ValueError("seconds must be between 1 and 60")
+    if not root.is_dir():
+        raise RuntimeError("tracefs is unavailable")
+    available = set((root / "available_filter_functions").read_text().split())
+    missing = set(FUNCTIONS) - available
+    if missing:
+        raise RuntimeError("missing kernel functions: " + ", ".join(sorted(missing)))
+    for event in EVENTS:
+        if not (root / "events" / event / "enable").exists():
+            raise RuntimeError("missing trace event: " + event)
+
+    out = Path(out)
+    out.mkdir(mode=0o700, parents=True, exist_ok=False)
+    instance = root / "instances" / f"nexus7_dsi_{os.getpid()}"
+    if instance.exists():
+        raise RuntimeError("trace instance already exists: " + str(instance))
+    started = time.time()
+    try:
+        instance.mkdir()
+        write(instance / "tracing_on", "0")
+        write(instance / "trace_clock", "mono")
+        write(instance / "buffer_size_kb", "512")
+        write(instance / "set_ftrace_filter", " ".join(FUNCTIONS))
+        write(instance / "current_tracer", "function")
+        for event in EVENTS:
+            write(instance / "events" / event / "enable", "1")
+        write(instance / "trace", "")
+        write(instance / "tracing_on", "1")
+        write(instance / "trace_marker", "nexus7-dsi-start")
+        time.sleep(seconds)
+        write(instance / "trace_marker", "nexus7-dsi-stop")
+        write(instance / "tracing_on", "0")
+        (out / "trace.txt").write_text((instance / "trace").read_text())
+    finally:
+        if instance.exists():
+            write(instance / "tracing_on", "0")
+            write(instance / "current_tracer", "nop")
+            for event in EVENTS:
+                write(instance / "events" / event / "enable", "0")
+            instance.rmdir()
+
+    ended = time.time()
+    (out / "meta.json").write_text(json.dumps({
+        "started_unix": started,
+        "ended_unix": ended,
+        "functions": FUNCTIONS,
+        "events": EVENTS,
+        "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+    }, indent=2) + "\n")
+    with (out / "kernel.log").open("w") as log:
+        subprocess.run(
+            ["journalctl", "-b", "-k", "--since", f"@{int(started)}",
+             "--until", f"@{int(ended) + 1}", "--no-pager"],
+            stdout=log, stderr=subprocess.STDOUT, check=False,
+        )
+    return out
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--seconds", type=int, default=15)
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        parser.error("run as root on the tablet")
+    try:
+        print(capture(args.out, args.seconds), flush=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"nexus7-dsi-trace: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
