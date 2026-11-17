@@ -55,6 +55,7 @@ Vendor kernel sources below are pinned to AOSP commit
 | [devices-8064.c](https://android.googlesource.com/kernel/msm/+/75977811169d779c039da38e63a1cac4e0cd1693/arch/arm/mach-msm/devices-8064.c) | PPSS memory windows, watchdog resource, `dsps_pwr_ctl_en = 1`; AP clock/regulator arrays empty. |
 | [msm_dsps.c](https://android.googlesource.com/kernel/msm/+/75977811169d779c039da38e63a1cac4e0cd1693/arch/arm/mach-msm/msm_dsps.c) | First open loads firmware; close unloads; watchdog and SMSM reset handling; AP pause/resume only when DSPS power control is disabled. |
 | [msm_smd.h](https://android.googlesource.com/kernel/msm/+/75977811169d779c039da38e63a1cac4e0cd1693/arch/arm/mach-msm/include/mach/msm_smd.h) | `SMD_APPS_DSPS` edge ID **3**; processor host ID and edge ID are different enums. |
+| [smd_pkt.c](https://android.googlesource.com/kernel/msm/+/75977811169d779c039da38e63a1cac4e0cd1693/arch/arm/mach-msm/smd_pkt.c) | Maps the AP device `smd_sns_dsps` to the channel name `SENSOR` on the `SMD_APPS_DSPS` edge. This identifies the packet endpoint, not its payload format. |
 | [irqs-8064.h](https://android.googlesource.com/kernel/msm/+/75977811169d779c039da38e63a1cac4e0cd1693/arch/arm/mach-msm/include/mach/irqs-8064.h) | DSPS SMD GIC SPI **138**, SMSM SPI **137**, watchdog SPI **213**. |
 | [Kconfig](https://android.googlesource.com/kernel/msm/+/75977811169d779c039da38e63a1cac4e0cd1693/arch/arm/mach-msm/Kconfig) | Describes DSPS as **ARM7**. Live firmware confirms ELF32 LE, `e_machine = 40` (ARM). |
 
@@ -99,6 +100,9 @@ The firmware contains `SENSOR`, `sns_smr_dsps.c`, SMD/SMEM support and
 `sns_pm_send_qmi_msg` strings. A QMI-related string alone does not prove QRTR
 framing, service IDs or compatibility with modern SMGR drivers. Firmware boot
 and discovery of a channel will not by themselves establish working IIO.
+The matching Android kernel's `smd_pkt.c` identifies the AP packet endpoint
+as `SENSOR` on the DSPS SMD edge. It still does not specify the application
+packet header, service IDs or registry transaction format.
 
 `persist` was inspected using **debugfs without `-w`**, not mounted or replayed.
 Only the sensor registry payload was copied for analysis:
