@@ -163,6 +163,13 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    riassociazione del solo gadget e il reboot caldo hanno entrambi lasciato
    ULPI in timeout. La futura correzione deve recuperare il bus ULPI senza
    distacco fisico e non lasciare una sorgente alta dopo perdita VBUS.
+   Nel quinto build, `ci_hdrc_msm_notify_event(STOPPED_EVENT)` avvia la
+   misura senza gadget appena `ci_udc_stop()` azzera `ci->driver`, prima di
+   `_gadget_stop_activity()` e `ci_udc_stop_for_otg_fsm()`. Lo stesso evento
+   è inviato dal percorso di errore di `ci_hdrc_gadget_connect()`. Quindi
+   `!ci->driver` da solo non dimostra che il controller e il PHY siano in uno
+   stato stabile e liberato dal gadget. Spostare la misura in una transizione
+   esplicita successiva alla pulizia e serializzarla con il nuovo connect.
 4. Distinguere la capacità della sorgente dallo stato AICL. Sullo stesso
    alimentatore `STAT_E=0x92` accompagnava circa −210 mA a schermo acceso;
    dopo un nuovo ciclo di negoziazione `STAT_E=0x84` accompagnava
