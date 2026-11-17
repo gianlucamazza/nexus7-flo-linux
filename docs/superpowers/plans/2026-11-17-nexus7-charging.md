@@ -199,6 +199,19 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    smontaggio gadget; ricontrollare il VBUS fisico prima di pubblicare il
    risultato e degradare a offline o 100 mA in caso di errore. La chiusura
    di queste due finestre è prerequisito del prossimo test nativo.
+   Una prima bozza di worker è stata compilata e scartata prima del commit:
+   un lock PHY esteso all'intero `ci_udc_stop()` invertirebbe l'ordine
+   rispetto a `fsm.lock`. `otg_statemachine()` prende `fsm.lock` e può
+   chiamare `ci_otg_start_gadget()` → `ci_hdrc_gadget_connect()`, mentre
+   `ci_udc_stop_for_otg_fsm()` prende `fsm.lock` alla fine dello stop.
+   Inoltre il percorso di disconnect chiama callback del gadget: non
+   mantenere un nuovo mutex hardware attraverso quei callback. La
+   sincronizzazione deve proteggere reset e uso PHY con sezioni critiche
+   limitate, e segnalare esplicitamente la fase di stop al worker; verificare
+   l'ordine dei lock con lockdep e una prova di bind/unbind concorrente.
+   Il commit host `238bc11b9` chiude invece la finestra di pubblicazione:
+   dopo la misura BC1.2 ricontrolla BSV e stato VBUS prima di annunciare
+   il risultato. Il test KUnit RED/GREEN passa 6/6; non è ancora installato.
 4. Distinguere la capacità della sorgente dallo stato AICL. Sullo stesso
    alimentatore `STAT_E=0x92` accompagnava circa −210 mA a schermo acceso;
    dopo un nuovo ciclo di negoziazione `STAT_E=0x84` accompagnava
