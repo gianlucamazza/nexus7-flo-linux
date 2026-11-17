@@ -60,6 +60,22 @@ def regmap_cache():
             if address[:-1] in wanted and address.endswith(":")}
 
 
+def inok_irq_count():
+    interrupts = read(Path("/proc/interrupts"))
+    if interrupts is None:
+        return None
+    for line in interrupts.splitlines():
+        if "smb347-inok" not in line.split():
+            continue
+        counts = []
+        for field in line.partition(":")[2].split():
+            if not field.isdecimal():
+                break
+            counts.append(int(field))
+        return sum(counts) if counts else None
+    return None
+
+
 def dpms_status(user):
     try:
         uid = pwd.getpwnam(user).pw_uid
@@ -90,6 +106,7 @@ def snapshot(user):
         "monotonic": time.monotonic(),
         "boot_id": read(Path("/proc/sys/kernel/random/boot_id")),
         "dpms_on": dpms_status(user),
+        "smb347_inok_irq_count": inok_irq_count(),
         "power_supply": supplies,
         "smb345_hardware": {name: hardware_reg(number)
                             for name, number in REGS.items()},
