@@ -241,6 +241,30 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    reale in una fase precedente, ma non spiega da solo la corrente bassa
    attuale. Non inferire la corrente di ingresso dal registro ICL.
 
+## Verifica del reset mentre USB resta online (18 novembre)
+
+Sul medesimo boot r29, il chip reale è passato da `0x01=0x44` e
+`0x30=0x40` a `0x01=0x41` e `0x30=0x00`, mentre USB è rimasta online e
+la regmap ha continuato a mostrare i primi valori. Il momento del reset
+non è stato catturato. Un successivo ricollegamento fisico ha lasciato
+invariati i registri reali e la corrente netta intorno a +130 mA con
+DPMS spento. Non è quindi ancora provato che il solo fronte INOK
+riattivi la configurazione.
+
+1. Nel collaudo del ramo rivisto, acquisire prima/dopo il contatore
+   `smb347-inok` in `/proc/interrupts`, GPIO23, `nexus7-charge-snapshot`
+   e boot ID. Distinguere un vero distacco/riattacco da un reset interno
+   con INOK sempre basso.
+2. Se i registri si azzerano senza un fronte INOK, identificare
+   l'evento hardware o power-supply che segnala la perdita di
+   configurazione; verificare che il driver rilegga l'hardware e
+   ripristini la politica della sorgente già classificata. L'assenza di
+   log su r29 non prova l'assenza del fronte, poiché r29 non gestisce
+   quell'IRQ.
+3. Richiedere una prova con display acceso e corrente netta positiva
+   sostenuta, oltre al rispetto del budget SDP/Unknown. Il registro ICL
+   nominale e lo stato `Charging` da soli non soddisfano il criterio.
+
 ## Fonti primarie
 
 - Kernel Linux locale: `drivers/power/supply/smb347-charger.c`,
