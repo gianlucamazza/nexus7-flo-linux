@@ -109,6 +109,31 @@ display acceso, ma non dimostra che l'alimentatore corrente possa fornire
    oltre la capacità identificata. Non dichiarare risolto il problema finché
    la ricarica con display acceso e i limiti USB non passano entrambe.
 
+## Fase successiva: sorgente indipendente dal gadget
+
+La quarta build nativa classifica la sorgente a 1,2 A e carica a schermo
+acceso, ma sganciare `g1` riduce immediatamente la power supply a
+`Unknown`/100 mA pur con VBUS online. Nel modo OTG FSM, `ci_otg_work()`
+ritorna prima di `ci_handle_vbus_change()` quando non c'è un gadget driver;
+la notifica VBUS esistente non può quindi avviare BC1.2 al boot senza `g1`.
+
+1. Far arrivare il cambiamento fisico di BSV al glue MSM dal worker OTG
+   anche senza gadget driver. Non eseguire la misura in IRQ. Pubblicare
+   subito `Unknown`/100 mA quando VBUS sale e offline/0 mA quando scende.
+2. Quando VBUS è presente e il gadget non possiede il PHY, acquisire
+   esplicitamente `phy_init()`/`phy_power_on()`, eseguire BC1.2, poi
+   `phy_power_off()`/`phy_exit()` su tutti i percorsi. Con un gadget
+   associato, conservare la misura nel reset del gadget, prima del pull-up.
+   Serializzare i due proprietari del PHY rispetto al worker OTG e alla
+   registrazione del gadget; non condividere un riferimento implicito.
+3. Allo sgancio del gadget ma con VBUS ancora presente, ripetere la misura
+   nel percorso senza gadget. Non mantenere per inerzia una classificazione
+   alta dopo rimozione fisica del cavo.
+4. Eseguire KUnit RED/GREEN sui passaggi di stato, build ARM, poi prove
+   native con gadget assente al boot e dopo sgancio, ripristino del gadget,
+   riavvio e sorgenti SDP/DCP note. Verificare corrente, tipo, ICL reale,
+   bilanciamento PHY e assenza di timeout a ogni passaggio.
+
 ## Fonti primarie
 
 - Kernel Linux locale: `drivers/power/supply/smb347-charger.c`,
