@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""Read battery, USB source and SMB345 hardware state without changing it.
+
+Run as root on the tablet. The SMB345 register reads use i2cget -f because
+the kernel driver owns the address; only configuration and status registers
+are read. IRQ status registers are deliberately excluded.
+"""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import pwd
+import subprocess
+import sys
+import time
+
+
+POWER = Path("/sys/class/power_supply")
+REGS = {
+    "input_limit": 0x01,
+    "aicl_config": 0x02,
+    "pin_config": 0x06,
+    "command_a": 0x30,
+    "command_b": 0x31,
+    "charge_status": 0x3d,
+    "status_d": 0x3e,
+    "status_e": 0x3f,
+}
+PROPERTIES = ("type", "status", "online", "capacity", "current_now",
+              "voltage_now", "current_max", "usb_type", "charge_type")
+
+
+def read(path):
+    try:
+        return path.read_text().strip()
+    except (FileNotFoundError, PermissionError):
+        return None
+
+
+def hardware_reg(number):
+    result = subprocess.run(
+        ["i2cget", "-f", "-y", "0", "0x6a", hex(number), "b"],
+        capture_output=True, text=True, timeout=4,
+    )
+    if result.returncode:
+        raise RuntimeError(f"SMB345 register {number:#x}: {result.stderr.strip()}")
+    return int(result.stdout.strip(), 16)
+
+
+def regmap_cache():
+    registers = read(Path("/sys/kernel/debug/regmap/0-006a/registers"))
+    if registers is None:
+        return None
+    wanted = {"01": "input_limit", "30": "command_a"}
+    return {wanted[address[:-1]]: int(value, 16)
+            for line in registers.splitlines()
+            if len(parts := line.split()) == 2
+            for address, value in [parts]
+            if address[:-1] in wanted and address.endswith(":")}
+
+
+def dpms_status(user):
+    try:
+        uid = pwd.getpwnam(user).pw_uid
+        runtime = Path(f"/run/user/{uid}")
+        instances = [path.name for path in (runtime / "hypr").iterdir()
+                     if (path / ".socket.sock").exists()]
+        if len(instances) != 1:
+            return None
+        result = subprocess.run(
+            ["runuser", "-u", user, "--", "env",
+             f"XDG_RUNTIME_DIR={runtime}",
+             f"HYPRLAND_INSTANCE_SIGNATURE={instances[0]}",
+             "hyprctl", "monitors", "-j"],
+            capture_output=True, text=True, timeout=4, check=True,
+        )
+        return [monitor["dpmsStatus"] for monitor in json.loads(result.stdout)]
+    except (OSError, KeyError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def snapshot(user):
+    supplies = {}
+    for path in sorted(POWER.iterdir()):
+        supplies[path.name] = {key: value for key in PROPERTIES
+                               if (value := read(path / key)) is not None}
+    return {
+        "time_unix": time.time(),
+        "monotonic": time.monotonic(),
+        "boot_id": read(Path("/proc/sys/kernel/random/boot_id")),
+        "dpms_on": dpms_status(user),
+        "power_supply": supplies,
+        "smb345_hardware": {name: hardware_reg(number)
+                            for name, number in REGS.items()},
+        "smb345_regmap_cache": regmap_cache(),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--samples", type=int, default=5)
+    parser.add_argument("--interval", type=float, default=2.0)
+    parser.add_argument("--user", default="tablet")
+    parser.add_argument("--out", type=Path)
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        parser.error("run as root on the tablet")
+    if not 1 <= args.samples <= 20 or not 0 <= args.interval <= 30:
+        parser.error("samples must be 1..20 and interval 0..30 seconds")
+    if args.out and args.out.exists():
+        parser.error("output file already exists")
+    output = args.out.open("x") if args.out else sys.stdout
+    try:
+        for index in range(args.samples):
+            output.write(json.dumps(snapshot(args.user), sort_keys=True) + "\n")
+            output.flush()
+            if index + 1 < args.samples:
+                time.sleep(args.interval)
+    except (OSError, RuntimeError) as exc:
+        print(f"nexus7-charge-snapshot: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if args.out:
+            output.close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
