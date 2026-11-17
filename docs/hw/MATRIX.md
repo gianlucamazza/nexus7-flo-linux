@@ -1,8 +1,10 @@
 # Nexus 7 2013 Wi-Fi (flo) hardware integration matrix, Linux 7.2 apq8064-mainline
 
-This matrix was originally an offline source review; the patches were only
-applied and compiled to a dtb. For the current sensor investigation and
-read-only tablet evidence, see [SENSORS.md](SENSORS.md).
+This matrix is a historical offline source review. Its "Configs (now)" column
+records the configuration at the time of that review, not the running r29
+kernel; the patches below were only applied and compiled to a dtb. For the
+current device status, see [ISSUES-20261117.md](ISSUES-20261117.md). For the
+sensor investigation, see [SENSORS.md](SENSORS.md).
 
 ## Sources
 
