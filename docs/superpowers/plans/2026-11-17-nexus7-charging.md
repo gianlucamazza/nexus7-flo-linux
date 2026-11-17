@@ -175,6 +175,13 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    valida, prima di avviare il peripheral per SDP/CDP. Usare questo ordine
    come riferimento architetturale: la notifica di stop deve liberare il
    PHY, non eseguire un'altra misura al centro dello smontaggio.
+   L'OTG FSM ChipIdea attuale ritorna prima di entrare in `B_IDLE` per una
+   B-device senza gadget driver (`ci_otg_fsm_work()`), quindi copiare solo
+   la chiamata al rilevatore in quel case non funzionerebbe. La modifica
+   deve rendere osservabile la sessione senza gadget e proteggere il reset
+   del controller: `hw_device_reset()` avviene prima della notifica glue,
+   perciò una mutex nel solo callback non serializzerebbe il reset con la
+   lettura ULPI. Questo è il confine di concorrenza da progettare e testare.
 4. Distinguere la capacità della sorgente dallo stato AICL. Sullo stesso
    alimentatore `STAT_E=0x92` accompagnava circa −210 mA a schermo acceso;
    dopo un nuovo ciclo di negoziazione `STAT_E=0x84` accompagnava
