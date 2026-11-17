@@ -187,6 +187,18 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    altrimenti pubblica offline, e non misura il PHY nel mezzo della pulizia.
    KUnit RED/GREEN 5/5 e checkpatch della diff passano. Rimane da progettare
    e provare la misura senza gadget al boot, serializzata con il reset.
+   Ispezione ulteriore: il ramo `CI_HDRC_REPORT_VBUS_WITHOUT_GADGET` di
+   `ci_otg_work()` chiama attualmente il callback di rilevamento prima di
+   `pm_runtime_get_sync()`, e `ci_otg_fsm_work()` ritorna subito per la
+   B-device senza gadget. La misura ULPI senza gadget non possiede quindi
+   una garanzia esplicita di runtime PM attivo. Inoltre
+   `ci_msm_source_detect()` pubblica `online=true` dopo la misura senza
+   ricontrollare VBUS: un distacco nel corso dell'attesa può lasciare un
+   budget alto obsoleto. Spostare la misura in un worker con riferimenti
+   runtime PM e PHY espliciti, serializzato con `hw_device_reset()` e lo
+   smontaggio gadget; ricontrollare il VBUS fisico prima di pubblicare il
+   risultato e degradare a offline o 100 mA in caso di errore. La chiusura
+   di queste due finestre è prerequisito del prossimo test nativo.
 4. Distinguere la capacità della sorgente dallo stato AICL. Sullo stesso
    alimentatore `STAT_E=0x92` accompagnava circa −210 mA a schermo acceso;
    dopo un nuovo ciclo di negoziazione `STAT_E=0x84` accompagnava
