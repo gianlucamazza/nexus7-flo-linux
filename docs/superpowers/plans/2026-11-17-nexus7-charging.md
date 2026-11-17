@@ -18,10 +18,12 @@ display acceso, ma non dimostra che l'alimentatore corrente possa fornire
 
 1. Leggere la documentazione primaria SMB345 e il percorso flo Android per
    classificare `STAT_D` codice 6 e identificare il segnale di tipo sorgente
-   disponibile su APQ8064. Il driver Android flo riceve il tipo dal PHY e usa
-   1,2 A per CDP/DCP/OTHER/ACA; per SDP lascia un limite USB basso. Il PHY
-   Linux installato oggi non espone una classificazione BC1.2. Finché il
-   codice 6 non è dimostrato, trattarlo come sorgente sconosciuta.
+   disponibile su APQ8064. Il driver Android flo riceve il tipo dal PHY:
+   `msm_otg.c` mappa esplicitamente SDP, CDP, DCP, ACA e proprietario verso
+   `usb_cable_type_detect()` e usa 1,2 A per CDP/DCP/OTHER/ACA; per SDP
+   lascia un limite USB basso. Il PHY Linux installato oggi non espone una
+   classificazione BC1.2. Finché il codice 6 non è dimostrato, trattarlo
+   come sorgente sconosciuta.
 2. Confermare con schema, DT storico e letture GPIO quale pin è INOK (storico
    TLMM GPIO23) e se STAT del caricatore è cablato. Non collegare INOK
    all'handler `smb347_interrupt`: quell'handler legge gli interrupt del chip
@@ -75,4 +77,5 @@ display acceso, ma non dimostra che l'alimentatore corrente possa fornire
 - Kernel Linux locale: `drivers/power/supply/smb347-charger.c`,
   `arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts`.
 - [Driver Android flo SMB345](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-kitkat-mr1/drivers/power/smb345-charger.c).
+- [Driver Android flo MSM OTG](https://android.googlesource.com/kernel/msm/+/android-6.0.1_r0.81/drivers/usb/otg/msm_otg.c): la classificazione del PHY viene inoltrata al SMB345; INOK è soltanto presenza.
 - [Driver Android grouper SMB347](https://android.googlesource.com/kernel/tegra/+/c77d6685da58e3434f47ffd29eb2b3c16e0c262a/drivers/power/smb347-charger.c): i codici APSD 1–4 sono definiti; il 6 non è classificato in questa fonte.
