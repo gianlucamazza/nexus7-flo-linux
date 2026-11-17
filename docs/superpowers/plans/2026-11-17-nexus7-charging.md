@@ -212,6 +212,22 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    Il commit host `238bc11b9` chiude invece la finestra di pubblicazione:
    dopo la misura BC1.2 ricontrolla BSV e stato VBUS prima di annunciare
    il risultato. Il test KUnit RED/GREEN passa 6/6; non è ancora installato.
+   Il commit host `407df79f1` sposta la misura senza gadget sulla stessa
+   coda seriale dell'OTG. Il worker prende un riferimento runtime PM del
+   parent, controlla ruolo, ID e BSV, usa `hw_device_reset()` per seguire
+   lo stesso avvio PHY del gadget, quindi bilancia il PHY con `STOPPED_EVENT`.
+   Gli eventi di transizione drenano il worker prima dello stop del gadget
+   o di un cambio di ruolo da sysfs. Il commit `a8c40b95e` fa scendere
+   il budget SDP a 100 mA dopo unbind, conserva tutti i bit di abilitazione
+   IRQ OTG attraverso il reset e riallinea ID, BSV e AVV della FSM se i
+   pin cambiano mentre l'IRQ è disabilitato. KUnit RED/GREEN 8/8 e
+   checkpatch passano; la revisione statica indipendente ha verificato i
+   tre rilievi precedenti senza trovarne altri bloccanti. La build ARM
+   finale e le prove native restano da completare. In particolare servono
+   boot senza gadget, bind/unbind ripetuti, distacco/riattacco fisico,
+   SDP/CDP/DCP e cambio di ruolo con lockdep, verificando OTGSC, ULPI,
+   sorgente pubblicata, ICL reale e batteria prima di integrare la patch
+   nel pacchetto r32.
 4. Distinguere la capacità della sorgente dallo stato AICL. Sullo stesso
    alimentatore `STAT_E=0x92` accompagnava circa −210 mA a schermo acceso;
    dopo un nuovo ciclo di negoziazione `STAT_E=0x84` accompagnava
