@@ -24,6 +24,13 @@ display acceso, ma non dimostra che l'alimentatore corrente possa fornire
    lascia un limite USB basso. Il PHY Linux installato oggi non espone una
    classificazione BC1.2. Finché il codice 6 non è dimostrato, trattarlo
    come sorgente sconosciuta.
+   La board Android APQ8064 identifica esplicitamente il PHY come
+   `SNPS_28NM_INTEGRATED_PHY`; il suo percorso USB usa DCD, rivelazione
+   primaria e secondaria via ULPI (`0x85–0x87`) prima di distinguere
+   SDP/CDP/DCP. Il PHY mainline `phy-qcom-usb-hs.c` oggi non esegue queste
+   fasi. Portarle nel ciclo di vita del controller/PHY richiede coordinare
+   l'enumerazione gadget: una semplice lettura del registro del caricatore
+   non sostituisce la misura sulle linee D+/D−.
 2. Confermare con schema, DT storico e letture GPIO quale pin è INOK (storico
    TLMM GPIO23) e se STAT del caricatore è cablato. Non collegare INOK
    all'handler `smb347_interrupt`: quell'handler legge gli interrupt del chip
@@ -78,4 +85,5 @@ display acceso, ma non dimostra che l'alimentatore corrente possa fornire
   `arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts`.
 - [Driver Android flo SMB345](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-kitkat-mr1/drivers/power/smb345-charger.c).
 - [Driver Android flo MSM OTG](https://android.googlesource.com/kernel/msm/+/android-6.0.1_r0.81/drivers/usb/otg/msm_otg.c): la classificazione del PHY viene inoltrata al SMB345; INOK è soltanto presenza.
+- [Board Android APQ8064](https://android.googlesource.com/kernel/msm/+/3be1a0852894880c46ec0fc74a3a61c2bb5799a0/arch/arm/mach-msm/board-apq8064.c): dichiara il PHY SNPS a 28 nm.
 - [Driver Android grouper SMB347](https://android.googlesource.com/kernel/tegra/+/c77d6685da58e3434f47ffd29eb2b3c16e0c262a/drivers/power/smb347-charger.c): i codici APSD 1–4 sono definiti; il 6 non è classificato in questa fonte.
