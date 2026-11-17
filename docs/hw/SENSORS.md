@@ -1,8 +1,16 @@
 # Flo accelerometer: implementation status and verified bring-up inputs
 
-The accelerometer is **not functional** on the running r23 kernel. The completed
-implementation here is a read-only firmware/memory audit, not a sensor driver.
-No kernel, regulator, firmware, calibration or tablet configuration was changed.
+The accelerometer is **not functional** on the running r29 kernel. No IIO
+device is enumerated. The read-only firmware/memory audit below was performed
+on r23; its evidence remains valid for the firmware files that were hashed,
+but its live kernel and memory observations describe that earlier boot.
+
+An isolated `flo/dsps-lifecycle` branch now contains a secure ARM7 DSPS
+remoteproc loader, a flo reserved-memory DT change and lifecycle tests. It
+passes 32 KUnit cases and a complete ARM build. The driver and DDR reservation
+are **not installed** on the tablet, and no SENSOR transport or accelerometer
+IIO driver exists. The current r29 DDR still overlaps the DSPS firmware range;
+do not boot DSPS on it.
 
 ## Reproduce the audit
 
@@ -114,10 +122,11 @@ infer calibration or sensor identity.
 1. Verify SMD IPC and the actual SENSOR packet format, service discovery and
    registry transactions from matching sources or captured stock traffic.
    Resolve ownership of bus, clocks, resets and sensor power.
-2. Add a native ARM7 DSPS remoteproc driver, DT binding and reserved-memory
-   region. Validate every segment before writes; use secure/nonsecure paths
-   only when their lifecycle is implemented. Handle boot failure, watchdog,
-   reset, shutdown, reload and suspend without corrupting shared memory.
+2. Complete native review and device bring-up of the ARM7 DSPS remoteproc
+   driver, DT binding and reserved-memory region already implemented in the
+   isolated branch. Verify the carveout after boot, then test secure start,
+   stop, failed boot, watchdog, reset, reload and suspend without corrupting
+   shared memory. The nonsecure path remains unsupported by design.
 3. Expose actual measurements through IIO. Retain valid per-device calibration;
    verify scale, axes, mount matrix, timestamps and six static poses. Never
    register a synthetic accelerometer merely to make a proxy detect one.
@@ -125,5 +134,6 @@ infer calibration or sensor identity.
    manual lock. Test four orientations, flat stability, greeter and session,
    suspend/resume, idle power and three boots per project kernel policy.
 
-These gates are not completed by the audit. There is no installed sensor
-workaround, background polling loop or claim of accelerometer support.
+These gates are not completed by the audit or the host build. There is no
+installed sensor workaround, background polling loop or claim of
+accelerometer support.
