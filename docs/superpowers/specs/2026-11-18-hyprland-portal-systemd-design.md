@@ -34,11 +34,23 @@ referenced by D-Bus. This is a packaging correction, not a runtime patch.
 
 ## Verification
 
-Build the revised package for armv7. Check the main package keeps the
-binary and D-Bus service and the subpackage owns exactly the user unit.
-Simulate and then install the two packages on the tablet. Confirm the
-portal backend starts through D-Bus, its interfaces are exposed, and
-the user journal no longer reports a missing unit. Test a screenshot
-request while the session is unlocked; avoid waking the tablet during
-charging until the owner is available. Keep the local package changes
-reviewable for an Alpine upstream submission.
+The isolated Alpine aports branch
+`fix/xdg-portal-hyprland-systemd` at `2431fca` implements the package
+split. An x86_64 Alpine edge `abuild` compiled the source and created
+the three APKs. Inspection confirms the main APK keeps the binary,
+portal descriptor and D-Bus service, while the `-systemd` APK owns only
+`usr/lib/systemd/user/xdg-desktop-portal-hyprland.service` and declares
+`install_if = xdg-desktop-portal-hyprland=1.3.12-r1 systemd`. The
+temporary container did not trust its freshly generated signing key
+when indexing its repository, after package creation. The armv7 build
+then completed through pmbootstrap. Both APKs were transferred over
+Wi-Fi and passed SHA-256 comparison and `apk add --simulate` before
+installation. D-Bus activation now starts the user service successfully;
+introspection exposes Screenshot, ScreenCast and GlobalShortcuts. The
+service is active with no failed user units, and PipeWire connects.
+An end-to-end screenshot with the display on remains to be tested.
+
+Keep the local package changes reviewable for an Alpine upstream
+submission. Test an end-to-end screenshot request while the session is
+unlocked; avoid waking the tablet during charging until the owner is
+available.
