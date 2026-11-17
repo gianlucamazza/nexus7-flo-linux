@@ -31,6 +31,7 @@ EVENTS = (
     "irq/irq_handler_entry",
     "irq/irq_handler_exit",
 )
+OPTIONAL_EVENTS = ("drm_msm_dsi/msm_dsi_error_reg",)
 
 
 def write(path, value):
@@ -49,6 +50,8 @@ def capture(out, seconds, root=TRACEFS):
     for event in EVENTS:
         if not (root / "events" / event / "enable").exists():
             raise RuntimeError("missing trace event: " + event)
+    events = EVENTS + tuple(event for event in OPTIONAL_EVENTS
+                            if (root / "events" / event / "enable").exists())
 
     out = Path(out)
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -63,7 +66,7 @@ def capture(out, seconds, root=TRACEFS):
         write(instance / "buffer_size_kb", "512")
         write(instance / "set_ftrace_filter", " ".join(FUNCTIONS))
         write(instance / "current_tracer", "function")
-        for event in EVENTS:
+        for event in events:
             write(instance / "events" / event / "enable", "1")
         write(instance / "trace", "")
         write(instance / "tracing_on", "1")
@@ -76,7 +79,7 @@ def capture(out, seconds, root=TRACEFS):
         if instance.exists():
             write(instance / "tracing_on", "0")
             write(instance / "current_tracer", "nop")
-            for event in EVENTS:
+            for event in events:
                 write(instance / "events" / event / "enable", "0")
             instance.rmdir()
 
@@ -85,7 +88,7 @@ def capture(out, seconds, root=TRACEFS):
         "started_unix": started,
         "ended_unix": ended,
         "functions": FUNCTIONS,
-        "events": EVENTS,
+        "events": events,
         "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
     }, indent=2) + "\n")
     with (out / "kernel.log").open("w") as log:
