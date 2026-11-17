@@ -32,10 +32,25 @@ EVENTS = (
     "irq/irq_handler_exit",
 )
 OPTIONAL_EVENTS = ("drm_msm_dsi/msm_dsi_error_reg",)
+IRQ_NAMES = ("dsi_isr", "msm")
 
 
 def write(path, value):
     path.write_text(value + "\n")
+
+
+def display_irqs():
+    irqs = {}
+    for line in Path("/proc/interrupts").read_text().splitlines():
+        number, separator, description = line.partition(":")
+        if not separator:
+            continue
+        name = description.split()[-1]
+        if name in IRQ_NAMES:
+            irqs[name] = int(number.strip())
+    if set(irqs) != set(IRQ_NAMES):
+        raise RuntimeError("display IRQs are unavailable: " + str(irqs))
+    return irqs
 
 
 def capture(out, seconds, root=TRACEFS):
@@ -52,6 +67,8 @@ def capture(out, seconds, root=TRACEFS):
             raise RuntimeError("missing trace event: " + event)
     events = EVENTS + tuple(event for event in OPTIONAL_EVENTS
                             if (root / "events" / event / "enable").exists())
+    irqs = display_irqs()
+    irq_filter = " || ".join(f"irq == {number}" for number in irqs.values())
 
     out = Path(out)
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -66,6 +83,8 @@ def capture(out, seconds, root=TRACEFS):
         write(instance / "buffer_size_kb", "512")
         write(instance / "set_ftrace_filter", " ".join(FUNCTIONS))
         write(instance / "current_tracer", "function")
+        for event in ("irq/irq_handler_entry", "irq/irq_handler_exit"):
+            write(instance / "events" / event / "filter", irq_filter)
         for event in events:
             write(instance / "events" / event / "enable", "1")
         write(instance / "trace", "")
@@ -89,6 +108,7 @@ def capture(out, seconds, root=TRACEFS):
         "ended_unix": ended,
         "functions": FUNCTIONS,
         "events": events,
+        "irqs": irqs,
         "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
     }, indent=2) + "\n")
     with (out / "kernel.log").open("w") as log:
