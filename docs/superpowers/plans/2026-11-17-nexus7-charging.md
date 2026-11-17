@@ -170,6 +170,11 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
    `!ci->driver` da solo non dimostra che il controller e il PHY siano in uno
    stato stabile e liberato dal gadget. Spostare la misura in una transizione
    esplicita successiva alla pulizia e serializzarla con il nuovo connect.
+   Il [driver OTG Qualcomm originale](https://android.googlesource.com/kernel/msm/+/91c4cf4d3c30eb61cd608cb164255d77019ab80f/drivers/usb/phy/phy-msm-usb.c)
+   avvia invece la classificazione nello stato `B_IDLE` con sessione VBUS
+   valida, prima di avviare il peripheral per SDP/CDP. Usare questo ordine
+   come riferimento architetturale: la notifica di stop deve liberare il
+   PHY, non eseguire un'altra misura al centro dello smontaggio.
 4. Distinguere la capacità della sorgente dallo stato AICL. Sullo stesso
    alimentatore `STAT_E=0x92` accompagnava circa −210 mA a schermo acceso;
    dopo un nuovo ciclo di negoziazione `STAT_E=0x84` accompagnava
