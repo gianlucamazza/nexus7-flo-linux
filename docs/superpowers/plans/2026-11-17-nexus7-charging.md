@@ -148,8 +148,14 @@ con DPMS spento, la batteria è tornata in carica lenta (+94…+115 mA).
 1. Verificare la causa del ruolo host iniziale: la DT flo guida GPIO77
    come uscita di `ext_3p3v`, mentre il kernel Android flo lo usa come
    ingresso USB ID. Il commit isolato `df2d35bb2` rimuove il regolatore;
-   il DTB compila, ma non è stato collaudato sul tablet. Non abilitare
-   ancora il boost host da 5 V.
+   il DTB compila. Nella prova nativa DTB-only, GPIO77 è rimasto
+   `out low` dopo il boot: il firmware conserva la direzione se Linux non
+   assegna uno stato pinctrl. Il DTB originale è stato ripristinato.
+   Il commit `8f9a45a37` aggiunge lo stato `input-enable` a `&usb1`.
+   Nella prova DTB-only su r29, GPIO77 è `in high`, OTG è
+   `b_peripheral`, il greeter e il Wi-Fi sono attivi, e non appare
+   EHCI host nel journal. Con DPMS spento la batteria carica
+   +100…+120 mA. Non abilitare ancora il boost host da 5 V.
 2. Tracciare OTGSC ID/BSV e stato GPIO77 dal probe al primo evento VBUS
    con la DT corretta. Richiedere ruolo gadget stabile con caricatore e
    nessun ingresso spurio in EHCI host prima di integrare il ramo BC1.2.
