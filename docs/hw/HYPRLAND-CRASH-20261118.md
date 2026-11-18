@@ -76,9 +76,12 @@ the full armv7 build finished successfully. The signed local APK
 The build log confirms application of the source patch and compilation
 of `SeatManager.cpp`. The APK was copied over Wi-Fi, hash checked and
 simulated on the tablet, then installed as `0.54.3-r1`. The installed
-binary hash matches the extracted APK binary. The existing Hyprland
-process still maps its previous, now deleted executable; a controlled
-greeter restart and native touch/hotplug test remain. The separate
+binary hash matches the extracted APK binary. The greeter was restarted
+over Wi-Fi at 06:14 CET: `greetd` became active, Hyprland PID 9738 mapped
+the new executable with the same SHA-256, and no new coredump appeared in
+the immediate check. The display was turned off through Hyprland DPMS;
+the battery returned to `Charging` at +129…+130 mA. User-confirmed PIN,
+touch and native hotplug/DPMS stress tests remain. The separate
 question of why the focus surface became null in the historical sequence
 also remains open.
 
