@@ -55,3 +55,22 @@ Ordered milestones taken from the open issues in
 - Propose the reviewed kernel patches to apq8064-mainline and the subsystem
   lists (not started). Local-only patches are listed in the `linux-flo` README.
 - Package fixes (Hyprland touch, portal unit split) to Alpine/postmarketOS aports.
+
+## flo-agents (opt-in, experimental)
+
+Remote agent-CLI sessions from the tablet. The tablet is the screen and
+keyboard; the CLI runs on a 64-bit host the user owns. Userland is Nura
+(formerly postmarketOS). Details: [`flo-agents.md`](flo-agents.md).
+
+### Milestone 1: remote session
+
+Configure a host, list tools, launch mosh/ssh (optional tmux) to the user's
+own Claude Code, Codex CLI or Grok Build install, check reachability, print
+official host install/login commands, and uninstall our config/wrapper.
+No agent binary is installed on the tablet.
+
+### Milestone 2+: future work
+
+- flo-shell UI to pick a tool and attach to `flo-<tool>`
+- Session status and reconnect helpers in the shell
+- Optional host-side extras (still no local agent install on the tablet)
