@@ -50,22 +50,25 @@ driver riconosce solo product code `0x60`. Un DTS che dichiari soltanto
 ## Esperimento nativo richiesto
 
 La preparazione host è su rami diagnostici separati: kernel
-`flo/audio-discovery` ai commit `9a7878318` e `6c1990d8c`, e pacchetto
-`flo/audio-discovery-package`. Il driver espone `enabled` con valore
+`flo/audio-discovery` ai commit `9a7878318`, `6c1990d8c` e `6a3fbe970`,
+e pacchetto `flo/audio-discovery-package`. Il driver espone `enabled` con valore
 iniziale `0`, asserisce reset al probe e bilancia il riferimento runtime
-PM, S4, L25 e MCLK in spegnimento o errore. KUnit passa 4/4; l'oggetto
+PM, S4, L25 e MCLK in spegnimento o errore. Una revisione indipendente
+ha individuato e fatto correggere la gestione di errori runtime PM,
+spegnimento e ordine del device link; KUnit passa 7/7; l'oggetto
 ARM compila; il DTB flo compilato passa 3/3 controlli su supply,
 GPIO34, MCLK, pinctrl e assenza di una route audio. S4 è condiviso e
 marcato `regulator-always-on`: disabilitare il suo consumer rilascia il
 riferimento della discovery, non spegne fisicamente quella rail.
-Il pacchetto `7.2-r35` è stato costruito da zero: contiene le tre opzioni
+Il pacchetto finale di prova `7.2-r36` è stato costruito da zero: contiene le tre opzioni
 kernel abilitate e il DTB estratto dall'APK passa 3/3 controlli. SHA256
-`e0c775184cc266972752d6426053b7c5efecb7ad8d6650edda58a6d8e5fc096d`.
-È copiato in `/var/tmp/linux-postmarketos-qcom-apq8064-audio-discovery-r35.apk`
+`27dd4cf0a1ac24e0e5fbe06b2e5b93b5efa15645b20c17cdab21d2cb61d68392`.
+È copiato in `/var/tmp/linux-postmarketos-qcom-apq8064-audio-discovery-r36.apk`
 e la simulazione `apk add --simulate --allow-untrusted` ha previsto il
 downgrade del kernel installato senza dipendenze mancanti. Il pacchetto
 non è installato. L'enumerazione del codec non è ancora stata osservata
 sul tablet; il test nativo richiede recovery presidiata.
+L'APK r35 precedente è stato rimosso dal tablet dopo la revisione.
 
 1. Preparare un kernel di discovery isolato che abiliti controller,
    pinctrl e alimentazione/reset/MCLK del codec, senza sound card né GPIO
