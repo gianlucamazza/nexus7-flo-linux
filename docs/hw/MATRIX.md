@@ -78,6 +78,12 @@ driver work, **(d)** not feasible in mainline today.
   | PMIC_DATA_1 | 0x00A4001C | 0x00A4001C | 0x0000001C |
   | Sequence | `03 0f` + `00 24 54 10 09 03 01 10 54 30 0c 24 30 0f` | identical | identical |
 
+  The apparent `spm_enter_idle_state` callback on state 0 is not a separate
+  defect: `CPU_PM_CPU_IDLE_ENTER_PARAM()` returns after `cpu_do_idle()` when
+  `idx == 0`, before it calls `qcom_cpu_spc()`. Thus state 0 really is WFI;
+  the callback name alone does not explain the hang. The remaining test must
+  isolate entry into state 1 (SPC) and its wake path.
+
   The command sequence and SPC start index (2) match. The PMIC delay value
   and the secondary-CPU PMIC data do not. Also, with the SAW regulators that local patch 0010 enables for
   cpufreq, the SPM driver rewrites the voltage fields of PMIC_DATA at run
