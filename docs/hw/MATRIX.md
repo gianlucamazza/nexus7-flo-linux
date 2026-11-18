@@ -92,9 +92,15 @@ driver work, **(d)** not feasible in mainline today.
   device and `bc_hrtimer` as the broadcast device, with an empty broadcast
   mask; the clocksource is `dg_timer`. These observations do not establish
   whether `msm_timer` actually stops or whether `bc_hrtimer` can wake a CPU
-  from SPC. A controlled SPC test should record timer wake events and first
-  try the DT property separately from PMIC register changes; do not enable
-  SPC on the production boot path based on this inference alone.
+  from SPC. The [flo vendor `pm2.c`](https://github.com/omnirom/android_kernel_asus_flo/blob/android-7.1/arch/arm/mach-msm/pm2.c)
+  only calls `msm_timer_enter_idle()` and
+  `msm_timer_exit_idle()` around modem-assisted full power collapse; its
+  standalone power-collapse path does not use those timer hooks. That
+  weakens the inference that the missing property alone explains SPC.
+  A controlled SPC test should first record timer wake events and distinguish
+  failure to wake from failure to restore CPU state. If a timer wake failure
+  is observed, try the DT property separately from PMIC register changes;
+  do not enable SPC on the production boot path based on source comparison.
 
   The command sequence and SPC start index (2) match. The PMIC delay value
   and the secondary-CPU PMIC data do not. Also, with the SAW regulators that local patch 0010 enables for
