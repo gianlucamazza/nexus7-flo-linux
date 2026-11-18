@@ -55,6 +55,20 @@ Hyprland/aquamarine logs and kernel DRM/input events with monotonic
 timestamps. Do not conflate this event with the separate 32-bit
 toplevel-address defect or GTK4 Settings crash.
 
+Host implementation progress on 18 November: the exact v0.54.3 source
+was built in an isolated Alpine edge x86 container with Aquamarine 0.12.0
+and Hyprutils 0.13.1, matching the tablet packages. A new GTest invokes
+the real `CSeatManager::sendTouchDown()` with a null surface while two
+touches are recorded. It exited with SIGSEGV (139) before the change.
+An entry guard before any listener/focus/count mutation made the test
+pass, and the complete available GTest suite passed 2/2 after clearing
+stale coverage data. Source branch `flo/touch-null` is at `58a41a8` in
+`build/hyprland-touch-src`; pmaports branch `flo/hyprland-touch` is at
+`0c060a8` in `build/pmaports-hyprland-touch`. The armv7 package build is
+in progress. This is a host regression and compile result, not a native
+touch/hotplug validation. The separate question of why the focus surface
+became null in the historical sequence remains open.
+
 The core was copied temporarily to a private host directory for analysis
 and deleted. This document contains no core memory or private firmware.
 
