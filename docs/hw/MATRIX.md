@@ -84,6 +84,18 @@ driver work, **(d)** not feasible in mainline today.
   the callback name alone does not explain the hang. The remaining test must
   isolate entry into state 1 (SPC) and its wake path.
 
+  A further wake candidate is the missing `local-timer-stop` property on
+  `cpu_spc` in `qcom-apq8064.dtsi`. `dt_idle_states.c` only sets
+  `CPUIDLE_FLAG_TIMER_STOP` when that property is present, and the cpuidle
+  core only requests timer broadcast for states with this flag. On the
+  running r29 tablet, `/proc/timer_list` shows a per-CPU `msm_timer` event
+  device and `bc_hrtimer` as the broadcast device, with an empty broadcast
+  mask; the clocksource is `dg_timer`. These observations do not establish
+  whether `msm_timer` actually stops or whether `bc_hrtimer` can wake a CPU
+  from SPC. A controlled SPC test should record timer wake events and first
+  try the DT property separately from PMIC register changes; do not enable
+  SPC on the production boot path based on this inference alone.
+
   The command sequence and SPC start index (2) match. The PMIC delay value
   and the secondary-CPU PMIC data do not. Also, with the SAW regulators that local patch 0010 enables for
   cpufreq, the SPM driver rewrites the voltage fields of PMIC_DATA at run
