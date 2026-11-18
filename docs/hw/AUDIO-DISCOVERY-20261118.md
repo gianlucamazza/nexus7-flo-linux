@@ -90,6 +90,33 @@ L'APK r35 precedente è stato rimosso dal tablet dopo la revisione.
    infine DMIC1, ADC2 e MICBIAS2. Verificare ogni percorso con ALSA
    prima di UCM/PipeWire.
 
+## Risultato nativo r47, 18 novembre
+
+Il pacchetto r47 è stato installato con `apk --no-network` e un servizio
+separato dalla sessione SSH. Il servizio è terminato con successo; kernel,
+DTB, initramfs e configurazione di boot coincidono nelle due partizioni di
+avvio. Dopo il riavvio, greeter, Wi-Fi e touch funzionano; l'utente ha
+confermato PIN e accesso. Non risultano unità di sistema fallite.
+
+Con il sequenziatore inizialmente spento (`enabled=0`), il bus mostrava già
+cinque indirizzi di enumerazione creati a runtime, non da figli del DTB:
+`217:50:0:0`, `217:50:1:0`, `217:50:5:0`, `217:60:0:0` e
+`217:60:1:0`. La sola permanenza delle voci sysfs dopo un ciclo di power
+non prova una nuova discovery. Una traccia kprobe di
+`slim_device_report_present()` durante un secondo ciclo ha invece catturato
+due nuovi `REPORT_PRESENT`: produttore `0x217`, prodotto `0x60`, indici
+dispositivo 1 e 0, istanza 0. Il servizio diagnostico è terminato con
+successo; `enabled=0`, ftrace `nop` e nessun kprobe residuo. La traccia
+privata è `reports/tabla-eaddr-r47-native.log` (SHA-256
+`343b8c0782ce683ce8732bcbaa3a8282c74879aa5aabf85b5283418d434b8d34`).
+
+L'esemplare quindi annuncia il codice Tabla 2.x `0x60`; non occorre
+indovinare la revisione. Questa prova riguarda solo enumerazione e sequenza
+di alimentazione: non esiste ancora una scheda ALSA, né è stata abilitata
+una route cuffie, speaker o microfono. Il successivo driver audio dovrà
+usare questi indirizzi reali, completare i due canali e validare prima il
+percorso cuffie a basso volume.
+
 ## Fonti controllate
 
 - `arch/arm/boot/dts/qcom/qcom-apq8064.dtsi`, nodi `slimbus` e `slimbam`;
