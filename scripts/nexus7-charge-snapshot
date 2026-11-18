@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import subprocess
 import sys
 import time
@@ -76,6 +77,14 @@ def inok_irq_count():
     return None
 
 
+def inok_gpio_level():
+    gpio = read(Path("/sys/kernel/debug/gpio"))
+    if gpio is None:
+        return None
+    match = re.search(r"(?m)^\s*gpio23\s*:\s*in\s+(low|high)\b", gpio)
+    return match.group(1) if match else None
+
+
 def dpms_status(user):
     try:
         uid = pwd.getpwnam(user).pw_uid
@@ -106,6 +115,7 @@ def snapshot(user):
         "monotonic": time.monotonic(),
         "boot_id": read(Path("/proc/sys/kernel/random/boot_id")),
         "dpms_on": dpms_status(user),
+        "smb347_inok_gpio_level": inok_gpio_level(),
         "smb347_inok_irq_count": inok_irq_count(),
         "power_supply": supplies,
         "smb345_hardware": {name: hardware_reg(number)
