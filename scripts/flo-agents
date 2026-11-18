@@ -64,6 +64,15 @@ require_safe_value() {
 	esac
 }
 
+validate_host() {
+	[ -n "$1" ] || die "host is required"
+	case $1 in
+	-*) die "FLO_AGENT_HOST must not start with -" ;;
+	*" "*|*"	"*) die "host must be a single token, e.g. user@host.example" ;;
+	esac
+	require_safe_value "$1"
+}
+
 validate_agent() {
 	case $1 in
 	claude|codex|grok) return 0 ;;
@@ -91,6 +100,7 @@ load_config() {
 	# shellcheck disable=SC1090
 	. "$cfg"
 	[ -n "${FLO_AGENT_HOST:-}" ] || die "FLO_AGENT_HOST missing"
+	validate_host "$FLO_AGENT_HOST"
 	[ -n "${FLO_AGENTS:-}" ] || die "FLO_AGENTS missing"
 	for t in $FLO_AGENTS; do
 		validate_agent "$t" || die "unknown agent in config: $t"
@@ -152,11 +162,7 @@ cmd_setup() {
 			die "missing --host (or run interactively on a tty)"
 		fi
 	fi
-	[ -n "$host" ] || die "host is required"
-	case $host in
-	*" "*|*"	"*) die "host must be a single token, e.g. user@host.example" ;;
-	esac
-	require_safe_value "$host"
+	validate_host "$host"
 
 	if [ -z "$transport" ]; then
 		if [ -t 0 ] && [ -z "${FLO_AGENTS_NONINTERACTIVE:-}" ]; then
@@ -290,7 +296,7 @@ cmd_launch() {
 		;;
 	ssh)
 		command -v ssh >/dev/null 2>&1 || die "ssh not found"
-		exec ssh -t "$host" "$@"
+		exec ssh -t -- "$host" "$@"
 		;;
 	esac
 }
@@ -300,7 +306,7 @@ cmd_check() {
 	command -v ssh >/dev/null 2>&1 || die "ssh not found"
 	host=$FLO_AGENT_HOST
 	printf 'host: %s\n' "$host"
-	if ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" true; then
+	if ssh -o BatchMode=yes -o ConnectTimeout=5 -- "$host" true; then
 		printf 'reachable: yes\n'
 	else
 		printf 'reachable: no\n'
@@ -310,7 +316,7 @@ cmd_check() {
 	for tool in $FLO_AGENTS; do
 		cmd=$(remote_cmd_for "$tool")
 		name=$(first_word "$cmd")
-		if path=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" command -v "$name"); then
+		if path=$(ssh -o BatchMode=yes -o ConnectTimeout=5 -- "$host" command -v "$name"); then
 			printf '%s: %s\n' "$tool" "$path"
 		else
 			printf '%s: missing\n' "$tool"
@@ -394,12 +400,22 @@ cmd_install() {
 
 cmd_uninstall() {
 	dir=$(config_dir)
-	cfg=$dir/config
-	rm -f "$cfg"
-	rmdir "$dir" 2>/dev/null || rm -rf "$dir"
+	rm -f "$dir/config"
+	for tmp in "$dir"/config.tmp.*; do
+		[ -e "$tmp" ] || continue
+		rm -f "$tmp"
+	done
+	rmdir "$dir" 2>/dev/null || true
 	wrap=$(wrapper_path)
 	if [ -L "$wrap" ]; then
-		rm -f "$wrap"
+		self=$(script_path)
+		target=
+		if command -v readlink >/dev/null 2>&1; then
+			target=$(readlink -f "$wrap" 2>/dev/null) || target=
+		fi
+		if [ -n "$target" ] && [ "$target" = "$self" ]; then
+			rm -f "$wrap"
+		fi
 	fi
 }
 

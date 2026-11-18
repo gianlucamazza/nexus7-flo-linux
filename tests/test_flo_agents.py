@@ -179,7 +179,7 @@ class FloAgentsTests(unittest.TestCase):
 
     def test_setup_rejects_unknown_agent(self):
         proc = self.run_cli(
-            ['setup', '--host', PLACEHOLDER_HOST, '--agents', 'omarchy'],
+            ['setup', '--host', PLACEHOLDER_HOST, '--agents', 'notatool'],
             path_mode='system',
         )
         self.assertNotEqual(proc.returncode, 0)
@@ -192,6 +192,27 @@ class FloAgentsTests(unittest.TestCase):
         )
         self.assertNotEqual(proc.returncode, 0)
         self.assertFalse(self.config_path().exists())
+
+    def test_setup_rejects_host_starting_with_dash(self):
+        proc = self.run_cli(
+            ['setup', '--host', '-oProxyCommand=true', '--agents', 'claude'],
+            path_mode='system',
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn('must not start with -', proc.stderr)
+        self.assertFalse(self.config_path().exists())
+        self.assertFalse(self.argv_log.exists())
+
+    def test_load_config_rejects_host_starting_with_dash(self):
+        self.write_config(FLO_AGENT_HOST='-oProxyCommand=true')
+        for cmd in (['list'], ['launch', 'claude'], ['check']):
+            with self.subTest(cmd=cmd):
+                if self.argv_log.exists():
+                    self.argv_log.unlink()
+                proc = self.run_cli(cmd)
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn('must not start with -', proc.stderr)
+                self.assertEqual(self.recorded_argv(), [])
 
     def test_setup_requires_host_without_tty(self):
         proc = self.run_cli(['setup', '--agents', 'claude'], path_mode='system')
@@ -284,7 +305,7 @@ class FloAgentsTests(unittest.TestCase):
         proc = self.run_cli(['launch', 'codex'])
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(self.recorded_argv(), [[
-            'ssh', '-t', PLACEHOLDER_HOST,
+            'ssh', '-t', '--', PLACEHOLDER_HOST,
             'tmux', 'new', '-A', '-s', 'flo-codex', 'codex',
         ]])
 
@@ -293,7 +314,7 @@ class FloAgentsTests(unittest.TestCase):
         proc = self.run_cli(['launch', 'grok'])
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(self.recorded_argv(), [[
-            'ssh', '-t', PLACEHOLDER_HOST, 'grok',
+            'ssh', '-t', '--', PLACEHOLDER_HOST, 'grok',
         ]])
 
     def test_launch_falls_back_to_ssh_when_mosh_missing(self):
@@ -301,7 +322,7 @@ class FloAgentsTests(unittest.TestCase):
         proc = self.run_cli(['launch'], path_mode='ssh_only')
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(self.recorded_argv()[0][0], 'ssh')
-        self.assertEqual(self.recorded_argv()[0][1:3], ['-t', PLACEHOLDER_HOST])
+        self.assertEqual(self.recorded_argv()[0][1:4], ['-t', '--', PLACEHOLDER_HOST])
         self.assertIn('flo-claude', self.recorded_argv()[0])
 
     def test_launch_uses_default_and_custom_remote_command(self):
@@ -342,6 +363,8 @@ class FloAgentsTests(unittest.TestCase):
         self.assertEqual(calls[0][:1], ['ssh'])
         self.assertIn('BatchMode=yes', ' '.join(calls[0]))
         self.assertIn('ConnectTimeout=5', ' '.join(calls[0]))
+        self.assertIn('--', calls[0])
+        self.assertEqual(calls[0][calls[0].index('--') + 1], PLACEHOLDER_HOST)
         self.assertEqual(calls[0][-1], 'true')
         self.assertFalse(self.curl_mark.exists())
 
@@ -372,13 +395,48 @@ class FloAgentsTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         wrapper = self.home / '.local' / 'bin' / 'flo-agents'
         self.assertTrue(self.config_path().exists())
-        self.assertTrue(wrapper.exists() or wrapper.is_symlink())
+        self.assertTrue(wrapper.is_symlink())
+        self.assertEqual(wrapper.resolve(), SCRIPT.resolve())
+        leftover = self.config_path().parent / 'keep-me'
+        leftover.write_text('user file\n')
+        tmp = self.config_path().parent / 'config.tmp.12345'
+        tmp.write_text('stale\n')
         gone = self.run_cli(['uninstall'], path_mode='system')
         self.assertEqual(gone.returncode, 0, gone.stderr)
         self.assertFalse(self.config_path().exists())
+        self.assertFalse(tmp.exists())
+        self.assertTrue(leftover.is_file())
+        self.assertTrue(leftover.parent.is_dir())
         self.assertFalse(wrapper.exists())
         self.assertFalse(wrapper.is_symlink())
         self.assertTrue(SCRIPT.is_file())
+
+    def test_uninstall_leaves_regular_file_wrapper(self):
+        wrap = self.home / '.local' / 'bin'
+        wrap.mkdir(parents=True)
+        foreign = wrap / 'flo-agents'
+        foreign.write_text('#!/bin/sh\n# not ours\n')
+        self.write_config()
+        gone = self.run_cli(['uninstall'], path_mode='system')
+        self.assertEqual(gone.returncode, 0, gone.stderr)
+        self.assertTrue(foreign.is_file())
+        self.assertFalse(foreign.is_symlink())
+        self.assertEqual(foreign.read_text(), '#!/bin/sh\n# not ours\n')
+        self.assertFalse(self.config_path().exists())
+
+    def test_uninstall_leaves_symlink_to_other_script(self):
+        wrap = self.home / '.local' / 'bin'
+        wrap.mkdir(parents=True)
+        other = self.home / 'other-tool'
+        other.write_text('#!/bin/sh\n')
+        foreign = wrap / 'flo-agents'
+        foreign.symlink_to(other)
+        self.write_config()
+        gone = self.run_cli(['uninstall'], path_mode='system')
+        self.assertEqual(gone.returncode, 0, gone.stderr)
+        self.assertTrue(foreign.is_symlink())
+        self.assertEqual(foreign.resolve(), other.resolve())
+        self.assertFalse(self.config_path().exists())
 
 
 if __name__ == '__main__':
