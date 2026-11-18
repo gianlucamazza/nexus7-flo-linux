@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Tue, 17 Nov 2026 21:27:45 +0100
+Subject: [PATCH] ARM: dts: qcom: flo: configure USB ID GPIO as input
+
+---
+ .../boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts   | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index f583bcedb..858ed603e 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -407,9 +407,21 @@ &usb_hs1_phy {
+ /* OTG */
+ &usb1 {
+ 	dr_mode = "otg";
++	pinctrl-names = "default";
++	pinctrl-0 = <&usb_id_pin>;
+ 	status = "okay";
+ };
+ 
++&tlmm_pinmux {
++	usb_id_pin: usb-id-state {
++		pins = "gpio77";
++		function = "gpio";
++		drive-strength = <2>;
++		bias-disable;
++		input-enable;
++	};
++};
++
+ &pm8921_gpio {
+ 	volume_keys_pin_a: volume-keys-active {
+ 		pins = "gpio4", "gpio38";

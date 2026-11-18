@@ -1,0 +1,62 @@
+Subject: [PATCH] ARM: dts: qcom: asus-flo: add SMB345 battery charger
+
+The charger sits at 0x6a on the GSBI1 I2C bus next to the bq27541 fuel
+gauge, as in the vendor board file (board-flo.c, smb345 at 0x6a on
+APQ_8064_GSBI1_QUP_I2C_BUS_ID). Charging is enabled through the
+active-low enable pin and INOK is active low, matching the vendor
+smb345-charger driver. A simple-battery node without charge limits is referenced, because the
+driver does not probe without monitored-battery.
+
+The USB input limit is raised to 1.5 A. The power-on default of 500 mA
+cannot keep up with the tablet under load, so the battery drains even
+on a wall charger; with AICL enabled the charger still backs off on a
+weaker source. The vendor driver uses 1.2 A for dedicated chargers.
+
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -2,6 +2,7 @@
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/input.h>
+ #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
++#include <dt-bindings/power/summit,smb347-charger.h>
+ 
+ #include "qcom-apq8064-v2.0.dtsi"
+ #include "pm8821.dtsi"
+@@ -78,6 +79,14 @@
+ 			};
+ 		};
+ 	};
++
++	/*
++	 * The charger driver needs a battery reference to probe. No charge
++	 * limits are given, so the values programmed in the SMB345 are kept.
++	 */
++	battery: battery {
++		compatible = "simple-battery";
++	};
+ };
+ 
+ &dsi0 {
+@@ -140,6 +149,22 @@
+ 		reg = <0x55>;
+ 	};
+ 
++	/*
++	 * Battery charger fed from the micro-USB connector. Current and
++	 * voltage limits are left at the values programmed in the chip.
++	 */
++	charger@6a {
++		compatible = "summit,smb345";
++		reg = <0x6a>;
++
++		summit,enable-charge-control = <SMB3XX_CHG_ENABLE_PIN_ACTIVE_LOW>;
++		summit,inok-polarity = <SMB3XX_SYSOK_INOK_ACTIVE_LOW>;
++		summit,enable-usb-charging;
++		/* DCP/CDP: the bootloader default of 500 mA cannot power the tablet */
++		summit,usb-current-limit-microamp = <1500000>;
++
++		monitored-battery = <&battery>;
++	};
+ };
+ 
+ &gsbi3 {

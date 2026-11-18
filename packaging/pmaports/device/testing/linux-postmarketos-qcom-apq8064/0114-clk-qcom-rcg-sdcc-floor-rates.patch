@@ -1,0 +1,376 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Tue, 17 Nov 2026 12:02:31 +0100
+Subject: [PATCH] clk: qcom: rcg: determine floor rates consistently for SDCC
+
+Select the floor table entry during rate determination and calculate propagated parent rates from that selected frequency. Saturate below the hardware minimum for the MMCI probe, reject missing tables, and preserve normal/dynamic ceiling policies. Use the floor policy for all MSM8960 SDCC sources. Test rounding, programming and recalculation through CCF and a controlled regmap.
+---
+ drivers/clk/qcom/Kconfig                    |  10 ++
+ drivers/clk/qcom/Makefile                   |   1 +
+ drivers/clk/qcom/clk-rcg-test.c             | 182 ++++++++++++++++++++
+ drivers/clk/qcom/clk-rcg.c                  |  32 +++-
+ drivers/clk/qcom/gcc-msm8960.c              |  10 +-
+ tools/testing/kunit/configs/mmci-rcg.config |  10 ++
+ 6 files changed, 234 insertions(+), 11 deletions(-)
+ create mode 100644 drivers/clk/qcom/clk-rcg-test.c
+ create mode 100644 tools/testing/kunit/configs/mmci-rcg.config
+
+diff --git a/drivers/clk/qcom/Kconfig b/drivers/clk/qcom/Kconfig
+index 7d84c2f1d..e24313556 100644
+--- a/drivers/clk/qcom/Kconfig
++++ b/drivers/clk/qcom/Kconfig
+@@ -19,6 +19,16 @@ menuconfig COMMON_CLK_QCOM
+ 
+ if COMMON_CLK_QCOM
+ 
++config QCOM_RCG_KUNIT_TEST
++	tristate "KUnit tests for Qualcomm RCG rate selection" if !KUNIT_ALL_TESTS
++	depends on KUNIT
++	default KUNIT_ALL_TESTS
++	help
++	  Test legacy Qualcomm root clock generators through common clock
++	  framework rounding, programming and recalculation with a controlled
++	  regmap. Exercise floor and ceiling policies, minimum supported rates
++	  and parent propagation without requiring Qualcomm hardware.
++
+ config CLK_ELIZA_DISPCC
+ 	tristate "Eliza Display Clock Controller"
+ 	depends on ARM64 || COMPILE_TEST
+diff --git a/drivers/clk/qcom/Makefile b/drivers/clk/qcom/Makefile
+index 58f9a5eb6..e36b03802 100644
+--- a/drivers/clk/qcom/Makefile
++++ b/drivers/clk/qcom/Makefile
+@@ -1,5 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0
+ obj-$(CONFIG_COMMON_CLK_QCOM) += clk-qcom.o
++obj-$(CONFIG_QCOM_RCG_KUNIT_TEST) += clk-rcg-test.o
+ 
+ clk-qcom-y += common.o
+ clk-qcom-y += clk-regmap.o
+diff --git a/drivers/clk/qcom/clk-rcg-test.c b/drivers/clk/qcom/clk-rcg-test.c
+new file mode 100644
+index 000000000..4d6625061
+--- /dev/null
++++ b/drivers/clk/qcom/clk-rcg-test.c
+@@ -0,0 +1,182 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <kunit/device.h>
++#include <kunit/test.h>
++#include <linux/clk.h>
++#include <linux/clk-provider.h>
++#include <linux/device.h>
++#include <linux/regmap.h>
++
++#include "common.h"
++#include "clk-rcg.h"
++
++static const struct parent_map rcg_test_parents[] = { { 0, 0 }, { 1, 3 } };
++static const struct freq_tbl rcg_test_rates[] = {
++	{    144000, 0, 3, 2, 125 },
++	{    400000, 1, 4, 1, 240 },
++	{  16000000, 1, 4, 1,   6 },
++	{  17070000, 1, 1, 2,  45 },
++	{  20210000, 1, 1, 1,  19 },
++	{  24000000, 1, 4, 1,   4 },
++	{  48000000, 1, 4, 1,   2 },
++	{  64000000, 1, 3, 1,   2 },
++	{  96000000, 1, 4, 0,   0 },
++	{ 192000000, 1, 2, 0,   0 },
++	{}
++};
++
++struct rcg_test_context {
++	struct clk_rcg rcg;
++	u32 registers[2];
++};
++
++static int rcg_test_read(void *context, unsigned int reg, unsigned int *value)
++{
++	struct rcg_test_context *ctx = context;
++
++	*value = ctx->registers[reg / sizeof(u32)];
++	return 0;
++}
++
++static int rcg_test_write(void *context, unsigned int reg, unsigned int value)
++{
++	struct rcg_test_context *ctx = context;
++
++	ctx->registers[reg / sizeof(u32)] = value;
++	return 0;
++}
++
++static const struct regmap_bus rcg_test_bus = {
++	.reg_read = rcg_test_read,
++	.reg_write = rcg_test_write,
++};
++
++static const struct regmap_config rcg_test_regmap_config = {
++	.reg_bits = 32,
++	.val_bits = 32,
++	.reg_stride = sizeof(u32),
++	.max_register = sizeof(u32),
++};
++
++static struct clk *rcg_test_register(struct kunit *test, const struct clk_ops *ops,
++				     const struct freq_tbl *rates, unsigned long flags)
++{
++	struct rcg_test_context *ctx;
++	struct clk_hw *parents[2];
++	struct clk_init_data init = {};
++	struct device *dev;
++	const char *name;
++	int i, ret;
++
++	ctx = kunit_kzalloc(test, sizeof(*ctx), GFP_KERNEL);
++	if (!ctx)
++		return ERR_PTR(-ENOMEM);
++	dev = kunit_device_register(test, "rcg-rate-test");
++	if (IS_ERR(dev))
++		return ERR_CAST(dev);
++	for (i = 0; i < ARRAY_SIZE(parents); i++) {
++		name = devm_kasprintf(dev, GFP_KERNEL, "%s-parent%d", dev_name(dev), i);
++		if (!name)
++			return ERR_PTR(-ENOMEM);
++		parents[i] = devm_clk_hw_register_fixed_rate(dev, name, NULL, 0,
++							     i ? 384000000 : 27000000);
++		if (IS_ERR(parents[i]))
++			return ERR_CAST(parents[i]);
++	}
++	init.name = dev_name(dev);
++	init.parent_hws = (const struct clk_hw **)parents;
++	init.num_parents = ARRAY_SIZE(parents);
++	init.flags = flags;
++	init.ops = ops;
++	ctx->rcg.ns_reg = 0;
++	ctx->rcg.md_reg = 4;
++	ctx->rcg.mn = (struct mn) {
++		.width = 8, .n_val_shift = 16, .m_val_shift = 16,
++		.mnctr_mode_shift = 5, .mnctr_en_bit = 8, .mnctr_reset_bit = 7,
++	};
++	ctx->rcg.p = (struct pre_div) { .pre_div_shift = 3, .pre_div_width = 2 };
++	ctx->rcg.s.parent_map = rcg_test_parents;
++	ctx->rcg.freq_tbl = rates;
++	ctx->rcg.clkr.hw.init = &init;
++	ctx->rcg.clkr.regmap = devm_regmap_init(dev, &rcg_test_bus, ctx,
++						&rcg_test_regmap_config);
++	if (IS_ERR(ctx->rcg.clkr.regmap))
++		return ERR_CAST(ctx->rcg.clkr.regmap);
++	ret = devm_clk_hw_register(dev, &ctx->rcg.clkr.hw);
++	if (ret)
++		return ERR_PTR(ret);
++	return devm_clk_hw_get_clk(dev, &ctx->rcg.clkr.hw, NULL);
++}
++
++static void rcg_floor_round_and_set(struct kunit *test)
++{
++	const unsigned long requested[] = { 52000000, 400000, 24000000, 48000000,
++					    96000000, 100000, 192000000, 300000000 };
++	const unsigned long expected[] = { 48000000, 400000, 24000000, 48000000,
++					   96000000, 144000, 192000000, 192000000 };
++	struct clk *clk = rcg_test_register(test, &clk_rcg_floor_ops, rcg_test_rates, 0);
++	int i;
++
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, clk);
++	for (i = 0; i < ARRAY_SIZE(requested); i++) {
++		KUNIT_EXPECT_EQ(test, clk_round_rate(clk, requested[i]), expected[i]);
++		KUNIT_ASSERT_EQ(test, clk_set_rate(clk, requested[i]), 0);
++		KUNIT_EXPECT_EQ(test, clk_get_rate(clk), expected[i]);
++	}
++}
++
++static void rcg_ceiling_policy_is_preserved(struct kunit *test)
++{
++	struct clk *clk = rcg_test_register(test, &clk_rcg_ops, rcg_test_rates, 0);
++
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, clk);
++	KUNIT_EXPECT_EQ(test, clk_round_rate(clk, 52000000), 64000000);
++	KUNIT_ASSERT_EQ(test, clk_set_rate(clk, 52000000), 0);
++	KUNIT_EXPECT_EQ(test, clk_get_rate(clk), 64000000);
++}
++
++static void rcg_floor_with_parent_rate_propagation(struct kunit *test)
++{
++	struct clk *clk = rcg_test_register(test, &clk_rcg_floor_ops, rcg_test_rates,
++					  CLK_SET_RATE_PARENT);
++
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, clk);
++	KUNIT_EXPECT_EQ(test, clk_round_rate(clk, 52000000), 48000000);
++	KUNIT_ASSERT_EQ(test, clk_set_rate(clk, 52000000), 0);
++	KUNIT_EXPECT_EQ(test, clk_get_rate(clk), 48000000);
++}
++
++static void rcg_empty_frequency_table_is_rejected(struct kunit *test)
++{
++	static const struct freq_tbl empty[] = { {} };
++	struct clk *clk = rcg_test_register(test, &clk_rcg_floor_ops, empty, 0);
++
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, clk);
++	KUNIT_EXPECT_LT(test, clk_round_rate(clk, 52000000), 0);
++	KUNIT_EXPECT_LT(test, clk_set_rate(clk, 52000000), 0);
++}
++
++static void rcg_missing_frequency_table_is_rejected(struct kunit *test)
++{
++	struct clk *clk = rcg_test_register(test, &clk_rcg_floor_ops, NULL, 0);
++
++	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, clk);
++	KUNIT_EXPECT_LT(test, clk_round_rate(clk, 52000000), 0);
++	KUNIT_EXPECT_LT(test, clk_set_rate(clk, 52000000), 0);
++}
++
++static struct kunit_case rcg_rate_cases[] = {
++	KUNIT_CASE(rcg_floor_round_and_set),
++	KUNIT_CASE(rcg_ceiling_policy_is_preserved),
++	KUNIT_CASE(rcg_floor_with_parent_rate_propagation),
++	KUNIT_CASE(rcg_empty_frequency_table_is_rejected),
++	KUNIT_CASE(rcg_missing_frequency_table_is_rejected),
++	{}
++};
++
++static struct kunit_suite rcg_rate_suite = {
++	.name = "qcom-rcg-rate",
++	.test_cases = rcg_rate_cases,
++};
++
++kunit_test_suite(rcg_rate_suite);
++MODULE_LICENSE("GPL");
+diff --git a/drivers/clk/qcom/clk-rcg.c b/drivers/clk/qcom/clk-rcg.c
+index 31f0650b4..e54b683bb 100644
+--- a/drivers/clk/qcom/clk-rcg.c
++++ b/drivers/clk/qcom/clk-rcg.c
+@@ -398,16 +398,27 @@ clk_dyn_rcg_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)
+ 
+ static int _freq_tbl_determine_rate(struct clk_hw *hw, const struct freq_tbl *f,
+ 		struct clk_rate_request *req,
+-		const struct parent_map *parent_map)
++		const struct parent_map *parent_map, bool floor)
+ {
+ 	unsigned long clk_flags, rate = req->rate;
+ 	struct clk_hw *p;
+ 	int index;
+ 
+-	f = qcom_find_freq(f, rate);
+-	if (!f)
++	if (!f || !f->freq)
+ 		return -EINVAL;
+ 
++	if (floor) {
++		const struct freq_tbl *first = f;
++
++		f = qcom_find_freq_floor(f, rate);
++		/* MMCI probes below the first supported rate. */
++		if (!f)
++			f = first;
++		rate = f->freq;
++	} else {
++		f = qcom_find_freq(f, rate);
++	}
++
+ 	index = qcom_find_src_index(hw, parent_map, f->src);
+ 	if (index < 0)
+ 		return index;
+@@ -438,7 +449,16 @@ static int clk_rcg_determine_rate(struct clk_hw *hw,
+ 	struct clk_rcg *rcg = to_clk_rcg(hw);
+ 
+ 	return _freq_tbl_determine_rate(hw, rcg->freq_tbl, req,
+-					rcg->s.parent_map);
++					rcg->s.parent_map, false);
++}
++
++static int clk_rcg_determine_floor_rate(struct clk_hw *hw,
++					struct clk_rate_request *req)
++{
++	struct clk_rcg *rcg = to_clk_rcg(hw);
++
++	return _freq_tbl_determine_rate(hw, rcg->freq_tbl, req,
++					rcg->s.parent_map, true);
+ }
+ 
+ static int clk_dyn_rcg_determine_rate(struct clk_hw *hw,
+@@ -453,7 +473,7 @@ static int clk_dyn_rcg_determine_rate(struct clk_hw *hw,
+ 	bank = reg_to_bank(rcg, reg);
+ 	s = &rcg->s[bank];
+ 
+-	return _freq_tbl_determine_rate(hw, rcg->freq_tbl, req, s->parent_map);
++	return _freq_tbl_determine_rate(hw, rcg->freq_tbl, req, s->parent_map, false);
+ }
+ 
+ static int clk_rcg_bypass_determine_rate(struct clk_hw *hw,
+@@ -836,7 +856,7 @@ const struct clk_ops clk_rcg_floor_ops = {
+ 	.get_parent = clk_rcg_get_parent,
+ 	.set_parent = clk_rcg_set_parent,
+ 	.recalc_rate = clk_rcg_recalc_rate,
+-	.determine_rate = clk_rcg_determine_rate,
++	.determine_rate = clk_rcg_determine_floor_rate,
+ 	.set_rate = clk_rcg_set_floor_rate,
+ };
+ EXPORT_SYMBOL_GPL(clk_rcg_floor_ops);
+diff --git a/drivers/clk/qcom/gcc-msm8960.c b/drivers/clk/qcom/gcc-msm8960.c
+index 0d3be44a6..f48b2c4ff 100644
+--- a/drivers/clk/qcom/gcc-msm8960.c
++++ b/drivers/clk/qcom/gcc-msm8960.c
+@@ -1843,7 +1843,7 @@ static struct clk_rcg sdc1_src = {
+ 			.name = "sdc1_src",
+ 			.parent_data = gcc_pxo_pll8,
+ 			.num_parents = ARRAY_SIZE(gcc_pxo_pll8),
+-			.ops = &clk_rcg_ops,
++			.ops = &clk_rcg_floor_ops,
+ 		},
+ 	}
+ };
+@@ -1893,7 +1893,7 @@ static struct clk_rcg sdc2_src = {
+ 			.name = "sdc2_src",
+ 			.parent_data = gcc_pxo_pll8,
+ 			.num_parents = ARRAY_SIZE(gcc_pxo_pll8),
+-			.ops = &clk_rcg_ops,
++			.ops = &clk_rcg_floor_ops,
+ 		},
+ 	}
+ };
+@@ -1943,7 +1943,7 @@ static struct clk_rcg sdc3_src = {
+ 			.name = "sdc3_src",
+ 			.parent_data = gcc_pxo_pll8,
+ 			.num_parents = ARRAY_SIZE(gcc_pxo_pll8),
+-			.ops = &clk_rcg_ops,
++			.ops = &clk_rcg_floor_ops,
+ 		},
+ 	}
+ };
+@@ -1993,7 +1993,7 @@ static struct clk_rcg sdc4_src = {
+ 			.name = "sdc4_src",
+ 			.parent_data = gcc_pxo_pll8,
+ 			.num_parents = ARRAY_SIZE(gcc_pxo_pll8),
+-			.ops = &clk_rcg_ops,
++			.ops = &clk_rcg_floor_ops,
+ 		},
+ 	}
+ };
+@@ -2043,7 +2043,7 @@ static struct clk_rcg sdc5_src = {
+ 			.name = "sdc5_src",
+ 			.parent_data = gcc_pxo_pll8,
+ 			.num_parents = ARRAY_SIZE(gcc_pxo_pll8),
+-			.ops = &clk_rcg_ops,
++			.ops = &clk_rcg_floor_ops,
+ 		},
+ 	}
+ };
+diff --git a/tools/testing/kunit/configs/mmci-rcg.config b/tools/testing/kunit/configs/mmci-rcg.config
+new file mode 100644
+index 000000000..98f0bf2f4
+--- /dev/null
++++ b/tools/testing/kunit/configs/mmci-rcg.config
+@@ -0,0 +1,10 @@
++CONFIG_KUNIT=y
++CONFIG_MMC=y
++CONFIG_DMADEVICES=y
++CONFIG_MMC_ARMMMCI_KUNIT_TEST=y
++CONFIG_COMPILE_TEST=y
++CONFIG_OF=y
++CONFIG_COMMON_CLK=y
++CONFIG_COMMON_CLK_QCOM=y
++CONFIG_QCOM_RCG_KUNIT_TEST=y
++CONFIG_RANDSTRUCT_NONE=y
+-- 
+2.56.0
+

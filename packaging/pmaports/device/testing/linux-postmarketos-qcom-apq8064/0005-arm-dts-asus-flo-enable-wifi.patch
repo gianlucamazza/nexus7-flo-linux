@@ -1,0 +1,55 @@
+Subject: [PATCH] ARM: dts: qcom: asus-flo: enable WCN3660 Wi-Fi
+
+Adapt the flo regulator values documented by John Stultz:
+https://lkml.rescloud.iu.edu/1705.1/03704.html
+
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -220,6 +220,26 @@
+ 			regulator-max-microvolt = <1225000>;
+ 			qcom,switch-mode-frequency = <3200000>;
+ 			bias-pull-down;
++		};
++
++		/* WCN3660 radio supplies; values from the flo board data. */
++		pm8921_s2: s2 {
++			regulator-min-microvolt = <1300000>;
++			regulator-max-microvolt = <1300000>;
++			qcom,switch-mode-frequency = <1600000>;
++		};
++
++		pm8921_l10: l10 {
++			regulator-min-microvolt = <2900000>;
++			regulator-max-microvolt = <2900000>;
++		};
++
++		pm8921_l24: l24 {
++			regulator-min-microvolt = <750000>;
++			regulator-max-microvolt = <1150000>;
++		};
++
++		pm8921_lvs2: lvs2 {
+ 		};
+ 
+ 		/* msm otg HSUSB_VDDCX */
+@@ -369,3 +389,20 @@
+ 		qcom,no-inversion;
+ 	};
+ };
++
++/* Qualcomm WCN3660 Wi-Fi. */
++&riva {
++	pinctrl-names = "default";
++	pinctrl-0 = <&riva_wlan_pin_a>;
++	vddcx-supply = <&pm8921_s3>;
++	vddmx-supply = <&pm8921_l24>;
++	vddpx-supply = <&pm8921_s4>;
++	status = "okay";
++
++	iris {
++		vddxo-supply = <&pm8921_l4>;
++		vddrfa-supply = <&pm8921_s2>;
++		vddpa-supply = <&pm8921_l10>;
++		vdddig-supply = <&pm8921_lvs2>;
++	};
++};

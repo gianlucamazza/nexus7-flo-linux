@@ -1,0 +1,29 @@
+From: Gianluca Mazza <info@gianlucamazza.it>
+Subject: [PATCH] ARM: dts: qcom: apq8064-asus-nexus7-flo: keep LVS7 on
+
+PM8921 LVS7 also supplies the Krait CPU and L2 HFPLLs: the downstream
+board file maps it to krait0..3_hfpll and l2_hfpll voters. Here only the
+DSI host, the DSI PHY and the panel use it, so it is switched off whenever
+all three are powered down, stopping every core that runs above the
+384 MHz auxiliary rate. Mark it always-on.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -386,9 +386,15 @@
+ 		/*
+ 		 * mipi_dsi.1-dsi1_vddio
+ 		 * pil_riva-pll_vdd
++		 *
++		 * Also the 1.8 V supply of the Krait CPU and L2 HFPLLs: the
++		 * downstream kernel keeps it on with "krait*_hfpll" and
++		 * "l2_hfpll" votes. Nothing votes for those here, so do not let
++		 * the display turn it off while the CPUs run from the HFPLLs.
+ 		 */
+ 		pm8921_lvs7: lvs7 {
+ 			bias-pull-down;
++			regulator-always-on;
+ 		};
+ 	};
+ };

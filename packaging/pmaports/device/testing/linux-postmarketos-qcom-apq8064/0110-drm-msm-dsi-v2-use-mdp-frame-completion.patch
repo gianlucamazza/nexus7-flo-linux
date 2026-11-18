@@ -1,0 +1,82 @@
+From af242cea430cc498d98fc61c0c58cf7988af3b20 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Tue, 17 Nov 2026 00:25:49 +0100
+Subject: [PATCH] drm/msm/dsi: use MDP frame completion for v2 video handover
+
+VIDEO_DONE still times out before command mode on the Nexus7 APQ8064 controller. The DRM vblank source advances every frame (verified native sequences and 13-17 ms waits). Use that source for the v2 pre-command wait, with errors returned before command setup.
+
+Assisted-by: Codex (OpenAI)
+---
+ drivers/gpu/drm/msm/dsi/dsi.h         |  1 +
+ drivers/gpu/drm/msm/dsi/dsi_host.c    |  4 ++++
+ drivers/gpu/drm/msm/dsi/dsi_manager.c | 20 ++++++++++++++++++++
+ 3 files changed, 25 insertions(+)
+
+diff --git a/drivers/gpu/drm/msm/dsi/dsi.h b/drivers/gpu/drm/msm/dsi/dsi.h
+index 93c028a12..70a9fa682 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi.h
++++ b/drivers/gpu/drm/msm/dsi/dsi.h
+@@ -52,6 +52,7 @@ int msm_dsi_manager_connector_init(struct msm_dsi *msm_dsi,
+ 				   struct drm_encoder *encoder);
+ int msm_dsi_manager_cmd_xfer(int id, const struct mipi_dsi_msg *msg);
+ bool msm_dsi_manager_cmd_xfer_trigger(int id, u32 dma_base, u32 len);
++int msm_dsi_manager_wait_for_vblank(int id);
+ int msm_dsi_manager_register(struct msm_dsi *msm_dsi);
+ void msm_dsi_manager_unregister(struct msm_dsi *msm_dsi);
+ void msm_dsi_manager_tpg_enable(void);
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_host.c b/drivers/gpu/drm/msm/dsi/dsi_host.c
+index 636f1df68..c79dd577e 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_host.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_host.c
+@@ -1221,6 +1221,10 @@ static int dsi_wait4video_done(struct msm_dsi_host *msm_host)
+ 	u32 ret = 0;
+ 	struct device *dev = &msm_host->pdev->dev;
+ 
++	/* V2 video streams synchronize to the MDP frame completion. */
++	if (msm_host->cfg_hnd->major == MSM_DSI_VER_MAJOR_V2)
++		return msm_dsi_manager_wait_for_vblank(msm_host->id);
++
+ 	reinit_completion(&msm_host->video_comp);
+ 	dsi_intr_ctrl(msm_host, DSI_IRQ_MASK_VIDEO_DONE, 1);
+ 
+diff --git a/drivers/gpu/drm/msm/dsi/dsi_manager.c b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+index 46faeaae9..d7746e399 100644
+--- a/drivers/gpu/drm/msm/dsi/dsi_manager.c
++++ b/drivers/gpu/drm/msm/dsi/dsi_manager.c
+@@ -4,6 +4,8 @@
+  */
+ 
+ #include "drm/drm_bridge_connector.h"
++#include <drm/drm_encoder.h>
++#include <drm/drm_vblank.h>
+ 
+ #include "msm_kms.h"
+ #include "dsi.h"
+@@ -488,6 +490,24 @@ int msm_dsi_manager_connector_init(struct msm_dsi *msm_dsi,
+ 	return 0;
+ }
+ 
++int msm_dsi_manager_wait_for_vblank(int id)
++{
++	struct msm_dsi *msm_dsi = dsi_mgr_get_dsi(id);
++	struct drm_encoder *encoder;
++	struct drm_crtc *crtc;
++
++	if (!msm_dsi || !msm_dsi->next_bridge)
++		return -ENODEV;
++	encoder = msm_dsi->next_bridge->encoder;
++	if (!encoder)
++		return -ENODEV;
++	crtc = READ_ONCE(encoder->crtc);
++	if (!crtc)
++		return -ENODEV;
++
++	return drm_crtc_wait_one_vblank(crtc);
++}
++
+ int msm_dsi_manager_cmd_xfer(int id, const struct mipi_dsi_msg *msg)
+ {
+ 	struct msm_dsi *msm_dsi = dsi_mgr_get_dsi(id);
+-- 
+2.56.0
+

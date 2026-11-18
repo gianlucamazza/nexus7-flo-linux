@@ -1,0 +1,12 @@
+Subject: [PATCH] drm/panel: jdi-lt070me05000: prepare the DSI host before sending commands
+
+--- a/drivers/gpu/drm/panel/panel-jdi-lt070me05000.c
++++ b/drivers/gpu/drm/panel/panel-jdi-lt070me05000.c
+@@ -375,6 +375,7 @@
+ 	mipi_dsi_set_drvdata(dsi, jdi);
+ 
+ 	jdi->dsi = dsi;
++	jdi->base.prepare_prev_first = true;
+ 
+ 	ret = jdi_panel_add(jdi);
+ 	if (ret < 0)

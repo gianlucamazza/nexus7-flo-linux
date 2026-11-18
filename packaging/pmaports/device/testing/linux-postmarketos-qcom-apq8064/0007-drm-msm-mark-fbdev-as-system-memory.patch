@@ -1,0 +1,14 @@
+Subject: [PATCH] drm/msm: mark the fbdev buffer as virtual system memory
+
+Match upstream msm_fbdev system-memory framebuffer flags.
+
+--- a/drivers/gpu/drm/msm/msm_fbdev.c
++++ b/drivers/gpu/drm/msm/msm_fbdev.c
+@@ -132,6 +132,7 @@
+ 	helper->fb = fb;
+ 
+ 	fbi->fbops = &msm_fb_ops;
++	fbi->flags |= FBINFO_VIRTFB; /* system memory */
+ 
+ 	drm_fb_helper_fill_info(fbi, helper, sizes);
+ 

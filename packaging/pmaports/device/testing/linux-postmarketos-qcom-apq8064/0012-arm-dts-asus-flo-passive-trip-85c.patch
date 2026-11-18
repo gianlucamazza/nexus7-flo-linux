@@ -1,0 +1,30 @@
+Subject: [PATCH] ARM: dts: qcom: asus-flo: move the passive CPU trip to 85 C
+
+The board idles around 60 C and reaches the default 75 C passive trip
+during ordinary scrolling, so the CPUs would be throttled in normal use.
+Two minutes of full load on four cores settle at 80-86 C with a cap at
+that level.
+
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -433,3 +433,20 @@
+ 		vdddig-supply = <&pm8921_lvs2>;
+ 	};
+ };
++
++/* The tablet idles around 60 C; start throttling well above that. */
++&cpu_alert0 {
++	temperature = <85000>;
++};
++
++&cpu_alert1 {
++	temperature = <85000>;
++};
++
++&cpu_alert2 {
++	temperature = <85000>;
++};
++
++&cpu_alert3 {
++	temperature = <85000>;
++};

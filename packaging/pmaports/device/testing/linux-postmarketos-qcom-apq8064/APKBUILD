@@ -1,0 +1,136 @@
+maintainer="Alexandre MINETTE <contact@alex-min.fr>"
+_flavor="postmarketos-qcom-apq8064"
+pkgname=linux-postmarketos-qcom-apq8064
+pkgver=7.2_p20261118101500
+pkgrel=41
+_commit="cc2a6a249989c3bb23d3191afb97bf60f01d535f"
+pkgdesc="Mainline Kernel fork for APQ8064 devices"
+url="https://github.com/apq8064-mainline/linux"
+arch="armv7"
+_carch="arm"
+license="GPL-2.0-only"
+options="
+	!check
+	!strip
+	!tracedeps
+	pmb:cross-native
+	pmb:kconfigcheck-community
+"
+makedepends="
+	bison
+	clang
+	elfutils-dev
+	findutils
+	flex
+	linux-headers
+	lld
+	llvm
+	openssl-dev
+	pahole
+	perl
+	postmarketos-installkernel
+	python3
+	xz
+	zstd
+"
+_config="config-$_flavor.$arch"
+
+# Source
+source="
+	https://github.com/apq8064-mainline/linux/archive/$_commit.tar.gz
+	$_config
+	0000-revert-drm-msm-a3xx-in-stream-smmu-tlb-invalidation.patch
+	0001-drm-msm-dsi-phy-28nm-8960-report-the-VCO-rate-that-i.patch
+	0002-drm-msm-dsi-derive-v2-link-clocks-from-the-rate-the-.patch
+	0004-drm-panel-jdi-prepare-dsi-host-first.patch
+	0015-drm-panel-jdi-brightness-at-init-sleep-in-disable.patch
+	0005-arm-dts-asus-flo-enable-wifi.patch
+	0006-wcn36xx-use-software-scan-for-flo-firmware.patch
+	0007-drm-msm-mark-fbdev-as-system-memory.patch
+	0008-arm-dts-asus-flo-correct-touchscreen-configuration.patch
+	0009-arm-dts-asus-flo-add-smb345-charger.patch
+	0010-arm-dts-apq8064-add-cpu-frequency-scaling.patch
+	0011-arm-dts-apq8064-add-cpu-cooling-maps.patch
+	0012-arm-dts-asus-flo-passive-trip-85c.patch
+	0013-thermal-qcom-tsens-8960-fix-status-clear-bits-on-apq8064.patch
+	0014-arm-dts-asus-flo-l2-cache-648mhz.patch
+	0016-arm-dts-apq8064-add-vendor-pvs-voltage-boost.patch
+	0101-thermal-qcom-tsens-fix-negative-threshold-codes.patch
+	0102-thermal-qcom-tsens-thread-the-v0-uplow-irq.patch
+	0105-arm-dts-asus-flo-keep-lvs7-on.patch
+	0106-input-elants_i2c-take-the-physical-size-from-touchscreen-x-y-mm.patch
+	0107-arm-dts-asus-flo-add-the-touchscreen-size-in-mm.patch
+	0108-drm-panel-jdi-use-8-bit-brightness.patch
+	0109-drm-msm-dsi-v2-sync-before-command-mode.patch
+	0110-drm-msm-dsi-v2-use-mdp-frame-completion.patch
+	0111-mmc-mmci-preserve-next-dma-mapping.patch
+	0112-mmc-mmci-map-only-pre-req.patch
+	0113-mmc-mmci-synchronize-dma-abort.patch
+	0114-clk-qcom-rcg-sdcc-floor-rates.patch
+	0118-arm-dts-flo-drop-bogus-usb-id-regulator.patch
+	0119-arm-dts-flo-configure-usb-id-input.patch
+	0120-flo-charger-bc12-inok-extcon.patch
+"
+builddir="$srcdir/linux-$_commit"
+
+prepare() {
+	default_prepare
+	cp "$srcdir/config-$_flavor.$arch" .config
+}
+
+build() {
+	unset LDFLAGS
+	make ARCH="$_carch" LLVM=1 \
+		KBUILD_BUILD_VERSION="$((pkgrel + 1 ))-$_flavor"
+}
+
+package() {
+	mkdir -p "$pkgdir"/boot
+	make zinstall modules_install dtbs_install \
+		ARCH="$_carch" \
+		LLVM=1 \
+		INSTALL_PATH="$pkgdir"/boot/ \
+		INSTALL_MOD_PATH="$pkgdir"/usr \
+		INSTALL_MOD_STRIP=1 \
+		INSTALL_DTBS_PATH="$pkgdir"/boot/dtbs
+	rm -f "$pkgdir"/usr/lib/modules/*/build "$pkgdir"/usr/lib/modules/*/source
+
+	install -D "$builddir"/include/config/kernel.release \
+		"$pkgdir"/usr/share/kernel/"$_flavor"/kernel.release
+}
+
+sha512sums="
+2474e2446a326b420ed3dd148a4a5d4857b9da99b35aec4be9bb93489e4f9eb8e94604546a6a3c7d2a52668866f95064f3efb158f9712be66d93f1fc8640e12f  cc2a6a249989c3bb23d3191afb97bf60f01d535f.tar.gz
+54d9773db1aa9e5eba79e2ca1313223c9ceb1d1ddca529b9b8439b03b469a8ec3382a2c1e960462a4e3390c418f065bf42db106c4eb698c92e5302bf8902b8f2  config-postmarketos-qcom-apq8064.armv7
+0f6677a6d3e782f4b4c2fbd9fa9ae9e671b91d1b223ca2134dc7a167d32d9e0603a44c6c9401b5963c5bb774c858431ec88c1e42cbb7317ab6b1aa83b0378503  0000-revert-drm-msm-a3xx-in-stream-smmu-tlb-invalidation.patch
+2219cc45ad3a5265a09d4f7d15d4ea11f4f4e45702a68d75bb5d753ffcc3c241885d70ce0c6de98c886237dbb129be532e4eb61c15001fd654de9cb3c7400036  0001-drm-msm-dsi-phy-28nm-8960-report-the-VCO-rate-that-i.patch
+82c5163114a3f4a8b01f3fd3498b9883bd5eb484e82bdff6469ff4bf09711bcaaa93098c83d6e4917533708907fdced4677d15b82fecd993533706ca291bcc5a  0002-drm-msm-dsi-derive-v2-link-clocks-from-the-rate-the-.patch
+2adfd0fcc4af73af3aaf2bf92d31e37e71f46932e659baddb6eb858b7425c554ac32faa953c91bbef72a680e699226bc89a2684d630999d719221f5300e7ae4a  0004-drm-panel-jdi-prepare-dsi-host-first.patch
+8ee72c3089b8f01f4c6cd49005dfdb253d9bf73dba20eae9b5479bfe4f1a91b84ef031bccfe8bfd1a030c9efec16d2b8a968d5b1621f7248b93bafbb4cc1b63d  0015-drm-panel-jdi-brightness-at-init-sleep-in-disable.patch
+4514f82e93370a62ea052d313adc3b5e7e07a068db1eaa8154af827447c8ce7ec0afe61c11827630a1d7530d82c562479ae6dfd4cb5a7024c9883eaba396aef3  0005-arm-dts-asus-flo-enable-wifi.patch
+58079f6391393f78cb1bfd4c7ad15ce5be84cdfcd116b54c402e0b1eead0811b2cc52674e3d581246ba557ac78242ea0d73c7a2ab7a4d7e9f4b84d0c42fcf38e  0006-wcn36xx-use-software-scan-for-flo-firmware.patch
+3cba2fd6bab42a7086e2f6ab1be065875e4e142bd70aa3052572d5df8c4f7d53c980dc33200bd36ae7268e4c3bb93ae79b02aa6cb38b08e5bc29abdcc65a82e2  0007-drm-msm-mark-fbdev-as-system-memory.patch
+1bacae588ed029e65fa9a5100d2d2d43626e6d58f5e457d453bd1d4eb8067de21e44e753458d7c693b12917332d1b6ecec2520b2d24cae63cd3f91186288d303  0008-arm-dts-asus-flo-correct-touchscreen-configuration.patch
+19c30b319d95d38a27608d5f23e5a71b286c82248c698529d43dde7b2e9d8f78fbf15b58bfbb150178bfba8ddbd8a3b470cd6e663522deeb5dd5010b65776cd7  0009-arm-dts-asus-flo-add-smb345-charger.patch
+ce60c6ffb8b564c5af3d6ebf6f8ad1e43e38233ab31ca3ae1a19441e5270b2804d7c45e9d3f24958c6b4ce844f59b66c4c424d90cf2b5ba5ad91c2e3a6c3d94b  0010-arm-dts-apq8064-add-cpu-frequency-scaling.patch
+aef42af0b644cdda4bfc81be6b3b6a02e4be31f215a5b492c353918f191ce3cdb0333040f4f29d38e85bb5a1920b1bdb0a1348b86ab698b85bed74e6f696b383  0011-arm-dts-apq8064-add-cpu-cooling-maps.patch
+fcfad2073b170a1494de139203fb3f7feb6307ff875da14b11e349f513bfcffb4f63f2d9a700ae5551592858bd1eb15f9448a12a7e95b163dd408a4a3857184c  0012-arm-dts-asus-flo-passive-trip-85c.patch
+12ef1f8be56523e1a93e883bd7dc98ae68d2cf508b560bfa7d2771615224b086910f76833c54d03a02ab715886734d6a5869734d5b9d444635a71f2ad8ebf7f6  0013-thermal-qcom-tsens-8960-fix-status-clear-bits-on-apq8064.patch
+1a55cc8db34637e7a28c194d568516274c623a942e6e6ffaa4bc416c34b3dac795ad11aa0c972a1de3b0c67a81f353dd78885032c09744f361ac2a690efcbf5b  0014-arm-dts-asus-flo-l2-cache-648mhz.patch
+75d4c54ff860cdfb4c485cdcd5c9b33fac6c659da3bae74da44db4b85df747892a5583df0f8078aa3d2d4a04c1e69b37e09ba961a23bed749b59163781a78565  0016-arm-dts-apq8064-add-vendor-pvs-voltage-boost.patch
+43aeba105de7a25b925e0bc80479445aea9508b3de962ded17c8c9727b714c09b1d0e9ed4631b856ddfe355e7342f03ab8c4f0f5cb7be347aed359e66d292ace  0101-thermal-qcom-tsens-fix-negative-threshold-codes.patch
+f98795dff616719eb60ef8c5d41c4adf8c088a433b38905c3fdb2039773bed0c6de273290f32ec073bfb092eac5821995b1217633460200b44029a4818c9696c  0102-thermal-qcom-tsens-thread-the-v0-uplow-irq.patch
+2e665ce6691f3a9160498f409d189fde9272575b6e2611c644da0fc95205955fb9a209c6ce01d2667a86cf4e493742140f95b5384aa3981c243aac33077dfd92  0105-arm-dts-asus-flo-keep-lvs7-on.patch
+f3e5ba2422781c16e84e1a79bb6db13c714c31cb1b65bcc39d82cdbb62cf3091e80c861992eb72488c008b378dcda6e1527ae84508e09da8f4d83cd3dc77e8b0  0106-input-elants_i2c-take-the-physical-size-from-touchscreen-x-y-mm.patch
+ef35268ff298c5de9cf76f981423313f82c071d49b6c8d66eb7be3718e9ea8866bb1365b1dfe2f7f7b37892fa89c7f800559601cc51fc6764682d443bac6c2c0  0107-arm-dts-asus-flo-add-the-touchscreen-size-in-mm.patch
+3109cfb44364ff24c9e8c51f8a69df18ca86ccc12d0fa0faf937cb4f2cf1398910464bf5bc1da07768dfa5ee19c5353111275b235e570e505a2ecc94836f52ae  0108-drm-panel-jdi-use-8-bit-brightness.patch
+c3b6f0705eff9cbf3737680258281158aeeea2c141fbf8fbd22307ec0a4594ceec1a949bf128e0d2b75973a7cca67183081ba0a353128978ad470f0966283169  0109-drm-msm-dsi-v2-sync-before-command-mode.patch
+92dc68746168ffe17fd285b765d9e8c473e8739a8f67623e9fe5e17fa29a857227c7656bf960ff8d3dfb4915cb66887f91e4a9b2bfbfb33b0ecfb1d945a5d473  0110-drm-msm-dsi-v2-use-mdp-frame-completion.patch
+228f6b0e20c34e3d55adb95f7f13e2b68457a0b6628f6a98cfa870e6e830a498becf13c59bfd96a0b1b19875554ed93f00c0dd11886fc7e68847ea1e2562c8b6  0111-mmc-mmci-preserve-next-dma-mapping.patch
+801a1ee5beac4bf50917e44ab664e5e2fa6044cbe44bf0b4bb245e86511f8ccc612a47abd379ae4c713b37348dc34a6b9083fb0e96a86d38fa128fe87175269e  0112-mmc-mmci-map-only-pre-req.patch
+efe68736e8a6328bba9bcd4e6daf291fa5c8c92dbd63de228ec5ce69cae3a2fa5887ba16ad2e29ed08e27de911a841d51fa3b481996eeaffc0bb7ee0fa2e8e69  0113-mmc-mmci-synchronize-dma-abort.patch
+a50d66238b1d2f4c49c4cf89bf727ec84719e9eb01e2f59b484a32682e210e97449863b2b28ad48aabe36257bab7d5acae91efc43bc9e5228d433248901e6f89  0114-clk-qcom-rcg-sdcc-floor-rates.patch
+19e8c5cc76e21a0903f09fce054934c0a888f30a41a4905d53418d705797c119a76d84ad807110772928c9fc3313cfe10d2fa9792f223b1c715a0bc2dd06cc8c  0118-arm-dts-flo-drop-bogus-usb-id-regulator.patch
+a9ef29853a776968b3651763c6b51e457b7f137b1f2703494139e0585ea3cee8bf6c9b2a40f5975b71b8e5da6e01a6ac2a666d67e3d3920c2bef19a809c09548  0119-arm-dts-flo-configure-usb-id-input.patch
+4fd1948eed254700927735d51dd05d166c7fa59257b683642802e1dfedb34b53ae3f8e5a5069054a89204994994322798da5ee2c15c0dff89d5a29e3c672fee3  0120-flo-charger-bc12-inok-extcon.patch
+"

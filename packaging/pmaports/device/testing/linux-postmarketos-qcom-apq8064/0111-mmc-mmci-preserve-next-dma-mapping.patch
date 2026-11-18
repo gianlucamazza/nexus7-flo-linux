@@ -1,0 +1,161 @@
+From 45f75744c2eabfd120ad7300a0c103ffddbdcc0c Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Tue, 17 Nov 2026 10:12:58 +0100
+Subject: [PATCH] mmc: mmci: preserve pre-mapped DMA descriptors across
+ synchronous requests
+
+BKOPS issues synchronous EXT_CSD reads while the next block request can already be pre-mapped. Such a request has no host_cookie and must prepare its own DMA descriptor rather than taking next_data. Add KUnit regression coverage of the actual handover callback.
+---
+ drivers/mmc/host/Kconfig                | 11 ++++
+ drivers/mmc/host/mmci-test.c            | 78 +++++++++++++++++++++++++
+ drivers/mmc/host/mmci.c                 |  9 ++-
+ tools/testing/kunit/configs/mmci.config |  4 ++
+ 4 files changed, 99 insertions(+), 3 deletions(-)
+ create mode 100644 drivers/mmc/host/mmci-test.c
+ create mode 100644 tools/testing/kunit/configs/mmci.config
+
+diff --git a/drivers/mmc/host/Kconfig b/drivers/mmc/host/Kconfig
+index 4f060d3e5..1060c4c57 100644
+--- a/drivers/mmc/host/Kconfig
++++ b/drivers/mmc/host/Kconfig
+@@ -33,6 +33,17 @@ config MMC_ARMMMCI
+ 
+ 	  If unsure, say N.
+ 
++config MMC_ARMMMCI_KUNIT_TEST
++	bool "KUnit tests for MMCI DMA request handover" if !KUNIT_ALL_TESTS
++	depends on KUNIT=y && MMC=y && DMADEVICES && HAS_IOMEM
++	select ARM_AMBA
++	select MMC_ARMMMCI
++	select DMA_ENGINE
++	default KUNIT_ALL_TESTS
++	help
++	  Test that synchronous MMC commands cannot consume the DMA descriptor
++	  pre-mapped for a later asynchronous block request.
++
+ config MMC_QCOM_DML
+ 	bool "Qualcomm Data Mover for SD Card Controller"
+ 	depends on MMC_ARMMMCI && QCOM_BAM_DMA
+diff --git a/drivers/mmc/host/mmci-test.c b/drivers/mmc/host/mmci-test.c
+new file mode 100644
+index 000000000..0448c5dd1
+--- /dev/null
++++ b/drivers/mmc/host/mmci-test.c
+@@ -0,0 +1,78 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <kunit/test.h>
++
++struct mmci_dma_test {
++	struct mmci_host host;
++	struct mmci_dmae_priv dmae;
++	struct mmc_data data;
++	struct dma_chan chan;
++	struct dma_async_tx_descriptor desc;
++};
++
++static struct mmci_dma_test *mmci_test_setup(struct kunit *test)
++{
++	struct mmci_dma_test *ctx;
++
++	ctx = kunit_kzalloc(test, sizeof(*ctx), GFP_KERNEL);
++	if (!ctx)
++		return NULL;
++	ctx->host.use_dma = true;
++	ctx->host.dma_priv = &ctx->dmae;
++	ctx->dmae.next_data.chan = &ctx->chan;
++	ctx->dmae.next_data.desc = &ctx->desc;
++	return ctx;
++}
++
++static void mmci_sync_request_preserves_next_mapping(struct kunit *test)
++{
++	struct mmci_dma_test *ctx = mmci_test_setup(test);
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	/* EXT_CSD/BKOPS bypasses pre_req while a block request is pre-mapped. */
++	mmci_dmae_get_next_data(&ctx->host, &ctx->data);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.next_data.chan, &ctx->chan);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.next_data.desc, &ctx->desc);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.cur, NULL);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.desc_current, NULL);
++}
++
++static void mmci_prepared_request_takes_own_mapping(struct kunit *test)
++{
++	struct mmci_dma_test *ctx = mmci_test_setup(test);
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	ctx->data.host_cookie = 7;
++	mmci_dmae_get_next_data(&ctx->host, &ctx->data);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.cur, &ctx->chan);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.desc_current, &ctx->desc);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.next_data.chan, NULL);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.next_data.desc, NULL);
++}
++
++static void mmci_pio_request_preserves_mapping(struct kunit *test)
++{
++	struct mmci_dma_test *ctx = mmci_test_setup(test);
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	ctx->host.use_dma = false;
++	ctx->data.host_cookie = 7;
++	mmci_dmae_get_next_data(&ctx->host, &ctx->data);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.next_data.chan, &ctx->chan);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.next_data.desc, &ctx->desc);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.cur, NULL);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->dmae.desc_current, NULL);
++}
++
++static struct kunit_case mmci_dma_cases[] = {
++	KUNIT_CASE(mmci_sync_request_preserves_next_mapping),
++	KUNIT_CASE(mmci_prepared_request_takes_own_mapping),
++	KUNIT_CASE(mmci_pio_request_preserves_mapping),
++	{}
++};
++
++static struct kunit_suite mmci_dma_suite = {
++	.name = "mmci-dma-handover",
++	.test_cases = mmci_dma_cases,
++};
++
++kunit_test_suite(mmci_dma_suite);
+diff --git a/drivers/mmc/host/mmci.c b/drivers/mmc/host/mmci.c
+index 564784c09..31827d3b3 100644
+--- a/drivers/mmc/host/mmci.c
++++ b/drivers/mmc/host/mmci.c
+@@ -1152,11 +1152,10 @@ void mmci_dmae_get_next_data(struct mmci_host *host, struct mmc_data *data)
+ 	struct mmci_dmae_priv *dmae = host->dma_priv;
+ 	struct mmci_dmae_next *next = &dmae->next_data;
+ 
+-	if (!host->use_dma)
++	/* Synchronous commands may run while a later request is pre-mapped. */
++	if (!host->use_dma || !data->host_cookie)
+ 		return;
+ 
+-	WARN_ON(!data->host_cookie && (next->desc || next->chan));
+-
+ 	dmae->desc_current = next->desc;
+ 	dmae->cur = next->chan;
+ 	next->desc = NULL;
+@@ -2722,3 +2721,7 @@ module_param(fmax, uint, 0444);
+ 
+ MODULE_DESCRIPTION("ARM PrimeCell PL180/181 Multimedia Card Interface driver");
+ MODULE_LICENSE("GPL");
++
++#if IS_ENABLED(CONFIG_MMC_ARMMMCI_KUNIT_TEST)
++#include "mmci-test.c"
++#endif
+diff --git a/tools/testing/kunit/configs/mmci.config b/tools/testing/kunit/configs/mmci.config
+new file mode 100644
+index 000000000..f15b6e9f2
+--- /dev/null
++++ b/tools/testing/kunit/configs/mmci.config
+@@ -0,0 +1,4 @@
++CONFIG_KUNIT=y
++CONFIG_MMC=y
++CONFIG_DMADEVICES=y
++CONFIG_MMC_ARMMMCI_KUNIT_TEST=y
+-- 
+2.56.0
+

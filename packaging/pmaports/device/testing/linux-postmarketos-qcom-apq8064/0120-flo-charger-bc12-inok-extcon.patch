@@ -1,0 +1,3377 @@
+diff --git a/Documentation/devicetree/bindings/power/supply/summit,smb347-charger.yaml b/Documentation/devicetree/bindings/power/supply/summit,smb347-charger.yaml
+index 65ed92bb0..8c030685b 100644
+--- a/Documentation/devicetree/bindings/power/supply/summit,smb347-charger.yaml
++++ b/Documentation/devicetree/bindings/power/supply/summit,smb347-charger.yaml
+@@ -23,8 +23,25 @@ properties:
+   interrupts:
+     maxItems: 1
+ 
++  inok-gpios:
++    maxItems: 1
++    description: |
++      Charger INOK input-presence signal, separate from the STAT interrupt.
++      When USB charging is enabled, the driver also publishes this input
++      state as an EXTCON_USB cable for a USB controller's VBUS detection.
++
+   monitored-battery: true
+ 
++  power-supplies: true
++
++  summit,usb-source:
++    type: boolean
++    description: |
++      The USB controller reports its BC1.2 source type and current limit to
++      the charger power supply. The controller names this charger in its
++      qcom,bc12-supplied-to property, avoiding a probe dependency cycle when
++      the controller also consumes the charger's VBUS extcon signal.
++
+   summit,enable-usb-charging:
+     type: boolean
+     description: Enable charging through USB.
+@@ -96,9 +113,25 @@ allOf:
+   - if:
+       properties:
+         compatible:
+-          enum:
+-            - summit,smb345
+-            - summit,smb358
++          const: summit,smb345
++
++    then:
++      properties:
++        summit,mains-current-limit-microamp:
++          enum: [ 300000, 500000, 700000, 900000, 1200000,
++                  1500000, 1800000, 2000000]
++
++        summit,usb-current-limit-microamp:
++          enum: [ 300000, 500000, 700000, 900000, 1200000,
++                  1500000, 1800000, 2000000]
++
++        summit,charge-current-compensation-microamp:
++          enum: [200000, 450000, 600000, 900000]
++
++  - if:
++      properties:
++        compatible:
++          const: summit,smb358
+ 
+     then:
+       properties:
+@@ -113,7 +146,12 @@ allOf:
+         summit,charge-current-compensation-microamp:
+           enum: [200000, 450000, 600000, 900000]
+ 
+-    else:
++  - if:
++      properties:
++        compatible:
++          const: summit,smb347
++
++    then:
+       properties:
+         summit,mains-current-limit-microamp:
+           enum: [ 300000, 500000, 700000, 900000, 1200000,
+diff --git a/Documentation/devicetree/bindings/usb/ci-hdrc-usb2.yaml b/Documentation/devicetree/bindings/usb/ci-hdrc-usb2.yaml
+index 620b56491..0a809d0e8 100644
+--- a/Documentation/devicetree/bindings/usb/ci-hdrc-usb2.yaml
++++ b/Documentation/devicetree/bindings/usb/ci-hdrc-usb2.yaml
+@@ -76,6 +76,13 @@ properties:
+     type: boolean
+     deprecated: true
+ 
++  qcom,bc12-supplied-to:
++    $ref: /schemas/types.yaml#/definitions/string
++    description: |
++      Name of the charger power supply that consumes the Qualcomm PHY BC1.2
++      source classification. The USB source registers this relationship with
++      the power supply core after it probes.
++
+   ulpi:
+     type: object
+     additionalProperties: false
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index 858ed603e..af8c6f236 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -138,19 +138,18 @@ bq27541@55 {
+ 		reg = <0x55>;
+ 	};
+ 
+-	/*
+-	 * Battery charger fed from the micro-USB connector. Current and
+-	 * voltage limits are left at the values programmed in the chip.
+-	 */
+-	charger@6a {
++	/* Battery charger fed from the micro-USB connector. */
++	charger: charger@6a {
+ 		compatible = "summit,smb345";
+ 		reg = <0x6a>;
++		inok-gpios = <&tlmm_pinmux 23 GPIO_ACTIVE_LOW>;
+ 
+ 		summit,enable-charge-control = <SMB3XX_CHG_ENABLE_PIN_ACTIVE_LOW>;
+ 		summit,inok-polarity = <SMB3XX_SYSOK_INOK_ACTIVE_LOW>;
+ 		summit,enable-usb-charging;
+-		/* DCP/CDP: the bootloader default of 500 mA cannot power the tablet */
+-		summit,usb-current-limit-microamp = <1500000>;
++		summit,usb-source;
++		/* Device cap; the USB source determines the operating limit. */
++		summit,usb-current-limit-microamp = <1200000>;
+ 
+ 		monitored-battery = <&battery>;
+ 	};
+@@ -407,6 +406,8 @@ &usb_hs1_phy {
+ /* OTG */
+ &usb1 {
+ 	dr_mode = "otg";
++	extcon = <&charger>;
++	qcom,bc12-supplied-to = "smb347-usb";
+ 	pinctrl-names = "default";
+ 	pinctrl-0 = <&usb_id_pin>;
+ 	status = "okay";
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index f0ede1cec..dad045289 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -875,6 +875,14 @@ config CHARGER_SMB347
+ 	  Say Y to include support for Summit Microelectronics SMB345,
+ 	  SMB347 or SMB358 Battery Charger.
+ 
++config CHARGER_SMB347_KUNIT_TEST
++	bool "Test SMB3XX register reset handling" if !KUNIT_ALL_TESTS
++	depends on KUNIT && CHARGER_SMB347=y
++	default KUNIT_ALL_TESTS
++	help
++	  Test register reads and updates after the charger's configuration
++	  RAM is reset independently of the driver.
++
+ config CHARGER_TPS65090
+ 	tristate "TPS65090 battery charger driver"
+ 	depends on MFD_TPS65090
+diff --git a/drivers/power/supply/smb347-charger-test.c b/drivers/power/supply/smb347-charger-test.c
+new file mode 100644
+index 000000000..325c6b5b8
+--- /dev/null
++++ b/drivers/power/supply/smb347-charger-test.c
+@@ -0,0 +1,613 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <kunit/device.h>
++#include <kunit/test.h>
++#include <linux/extcon-provider.h>
++
++struct smb347_test_bus {
++	u8 regs[SMB347_MAX_REGISTER + 1];
++	unsigned int writes[SMB347_MAX_REGISTER + 1];
++	bool fail_read;
++	unsigned int fail_reg;
++	bool fail_write;
++	unsigned int fail_write_reg;
++};
++
++static int smb347_test_read(void *context, unsigned int reg, unsigned int *val)
++{
++	struct smb347_test_bus *bus = context;
++
++	if (bus->fail_read && reg == bus->fail_reg)
++		return -EIO;
++	*val = bus->regs[reg];
++	return 0;
++}
++
++static int smb347_test_write(void *context, unsigned int reg, unsigned int val)
++{
++	struct smb347_test_bus *bus = context;
++
++	if (bus->fail_write && reg == bus->fail_write_reg)
++		return -EIO;
++	bus->regs[reg] = val;
++	bus->writes[reg]++;
++	return 0;
++}
++
++static const struct regmap_bus smb347_test_regmap_bus = {
++	.reg_read = smb347_test_read,
++	.reg_write = smb347_test_write,
++};
++
++static void smb347_test_regmap_exit(void *data)
++{
++	regmap_exit(data);
++}
++
++static struct regmap *
++smb347_test_regmap(struct kunit *test, struct smb347_test_bus *bus)
++{
++	struct device *dev;
++	struct regmap *map;
++	int ret;
++
++	dev = kunit_device_register(test, "smb347-reset-test");
++	if (IS_ERR(dev))
++		return ERR_CAST(dev);
++	map = regmap_init(dev, &smb347_test_regmap_bus, bus, &smb347_regmap);
++	if (IS_ERR(map))
++		return map;
++	ret = kunit_add_action_or_reset(test, smb347_test_regmap_exit, map);
++	if (ret)
++		return ERR_PTR(ret);
++	return map;
++}
++
++static void smb347_config_read_tracks_chip_reset(struct kunit *test)
++{
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct regmap *map;
++	unsigned int val;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	bus->regs[CFG_CURRENT_LIMIT] = 0x44;
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	KUNIT_ASSERT_EQ(test, regmap_read(map, CFG_CURRENT_LIMIT, &val), 0);
++	KUNIT_ASSERT_EQ(test, val, 0x44U);
++
++	/* Power loss reloads config RAM without informing regmap. */
++	bus->regs[CFG_CURRENT_LIMIT] = 0x41;
++	KUNIT_ASSERT_EQ(test, regmap_read(map, CFG_CURRENT_LIMIT, &val), 0);
++	KUNIT_EXPECT_EQ(test, val, 0x41U);
++}
++
++static void smb347_input_notification_updates_usb_extcon(struct kunit *test)
++{
++	static const unsigned int cables[] = { EXTCON_USB, EXTCON_NONE };
++	struct smb347_charger smb = {};
++	struct device *dev;
++	int ret;
++
++	if (!IS_ENABLED(CONFIG_EXTCON)) {
++		kunit_skip(test, "EXTCON is disabled");
++		return;
++	}
++
++	dev = kunit_device_register(test, "smb347-vbus-extcon");
++	KUNIT_ASSERT_FALSE(test, IS_ERR(dev));
++	smb.dev = dev;
++	smb.vbus_edev = devm_extcon_dev_allocate(dev, cables);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(smb.vbus_edev));
++	ret = devm_extcon_dev_register(dev, smb.vbus_edev);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++
++	KUNIT_EXPECT_EQ(test, extcon_get_state(smb.vbus_edev, EXTCON_USB), 0);
++	smb.usb_online = true;
++	smb347_notify_input_change(&smb);
++	KUNIT_EXPECT_EQ(test, extcon_get_state(smb.vbus_edev, EXTCON_USB), 1);
++	smb.usb_online = false;
++	smb347_notify_input_change(&smb);
++	KUNIT_EXPECT_EQ(test, extcon_get_state(smb.vbus_edev, EXTCON_USB), 0);
++}
++
++static void smb347_command_update_uses_chip_state(struct kunit *test)
++{
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct regmap *map;
++	unsigned int val;
++	int ret;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	bus->regs[CMD_A] = 0x40;
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	KUNIT_ASSERT_EQ(test, regmap_read(map, CMD_A, &val), 0);
++	KUNIT_ASSERT_EQ(test, val, 0x40U);
++
++	bus->regs[CMD_A] = 0;
++	ret = regmap_update_bits(map, CMD_A, CMD_A_ALLOW_WRITE,
++				 CMD_A_ALLOW_WRITE);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	KUNIT_EXPECT_EQ(test, bus->regs[CMD_A], 0x80);
++}
++
++static void smb347_usb_type_reports_only_known_apsd_codes(struct kunit *test)
++{
++	static const struct {
++		u8 status;
++		int type;
++	} cases[] = {
++		{ 0x09, POWER_SUPPLY_USB_TYPE_CDP },
++		{ 0x0a, POWER_SUPPLY_USB_TYPE_DCP },
++		{ 0x0c, POWER_SUPPLY_USB_TYPE_SDP },
++		{ 0x0b, POWER_SUPPLY_USB_TYPE_UNKNOWN },
++		{ 0x0e, POWER_SUPPLY_USB_TYPE_UNKNOWN },
++		{ 0x02, POWER_SUPPLY_USB_TYPE_UNKNOWN },
++	};
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct power_supply psy = { .desc = &smb347_usb_desc };
++	struct smb347_charger smb = { .usb_online = true };
++	union power_supply_propval val;
++	struct regmap *map;
++	int i, ret;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	smb.regmap = map;
++	psy.drv_data = &smb;
++	for (i = 0; i < ARRAY_SIZE(cases); i++) {
++		bus->regs[0x3e] = cases[i].status;
++		ret = smb347_get_property_locked(&psy, POWER_SUPPLY_PROP_USB_TYPE, &val);
++		KUNIT_ASSERT_EQ(test, ret, 0);
++		KUNIT_EXPECT_EQ(test, val.intval, cases[i].type);
++	}
++
++	smb.usb_online = false;
++	bus->regs[0x3e] = 0x0a;
++	ret = smb347_get_property_locked(&psy, POWER_SUPPLY_PROP_USB_TYPE, &val);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	KUNIT_EXPECT_EQ(test, val.intval, POWER_SUPPLY_USB_TYPE_UNKNOWN);
++}
++
++static void smb347_usb_type_is_only_advertised_for_usb(struct kunit *test)
++{
++	bool found_usb = false;
++	bool found_mains = false;
++	int i;
++
++	for (i = 0; i < smb347_usb_desc.num_properties; i++)
++		found_usb |= smb347_usb_desc.properties[i] ==
++			     POWER_SUPPLY_PROP_USB_TYPE;
++	for (i = 0; i < smb347_mains_desc.num_properties; i++)
++		found_mains |= smb347_mains_desc.properties[i] ==
++			       POWER_SUPPLY_PROP_USB_TYPE;
++	KUNIT_EXPECT_TRUE(test, found_usb);
++	KUNIT_EXPECT_FALSE(test, found_mains);
++}
++
++static void smb347_input_event_controls_charging_without_chip_irq(struct kunit *test)
++{
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct smb347_charger smb = { .use_usb = true,
++		.enable_control = SMB3XX_CHG_ENABLE_SW };
++	struct device *dev;
++	struct regmap *map;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	dev = kunit_device_register(test, "smb347-input-event");
++	KUNIT_ASSERT_FALSE(test, IS_ERR(dev));
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	smb.dev = dev;
++	smb.regmap = map;
++
++	/* No IRQSTAT_E interrupt latch: INOK is a separate physical pin. */
++	bus->regs[IRQSTAT_E] = 0;
++	KUNIT_ASSERT_EQ(test, smb347_handle_input_change(&smb), 1);
++	KUNIT_EXPECT_TRUE(test, smb.usb_online);
++	KUNIT_EXPECT_EQ(test, bus->regs[CMD_A] & CMD_A_CHG_ENABLED,
++			CMD_A_CHG_ENABLED);
++
++	bus->regs[IRQSTAT_E] = IRQSTAT_E_USBIN_UV_STAT;
++	KUNIT_ASSERT_EQ(test, smb347_handle_input_change(&smb), 1);
++	KUNIT_EXPECT_FALSE(test, smb.usb_online);
++	KUNIT_EXPECT_EQ(test, bus->regs[CMD_A] & CMD_A_CHG_ENABLED, 0);
++}
++
++static void smb347_input_event_read_failure_preserves_charging_state(struct kunit *test)
++{
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct smb347_charger smb = { .use_usb = true,
++		.enable_control = SMB3XX_CHG_ENABLE_SW };
++	struct regmap *map;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	smb.regmap = map;
++	bus->fail_read = true;
++	bus->fail_reg = IRQSTAT_E;
++	KUNIT_EXPECT_EQ(test, smb347_handle_input_change(&smb), -EIO);
++	KUNIT_EXPECT_FALSE(test, smb.usb_online);
++	KUNIT_EXPECT_EQ(test, bus->regs[CMD_A] & CMD_A_CHG_ENABLED, 0);
++}
++
++static void smb347_inok_restores_config_without_online_transition(struct kunit *test)
++{
++	static const struct property_entry properties[] = {
++		PROPERTY_ENTRY_BOOL("power-supplies"),
++		{ }
++	};
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct smb347_charger smb = {
++		.id = SMB345,
++		.use_usb = true,
++		.usb_online = true,
++		.irq_unsupported = true,
++		.enable_control = SMB3XX_CHG_ENABLE_PIN_ACTIVE_LOW,
++		.usb_hc_current_limit = 1500000,
++		.soft_cold_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.soft_hot_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.hard_cold_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.hard_hot_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.soft_temp_limit_compensation = SMB3XX_SOFT_TEMP_COMPENSATE_DEFAULT,
++	};
++	struct device *dev;
++	struct regmap *map;
++	unsigned int current_writes, pin_writes;
++	int ret;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	dev = kunit_device_register(test, "smb347-inok-reset");
++	KUNIT_ASSERT_FALSE(test, IS_ERR(dev));
++	ret = device_create_managed_software_node(dev, properties, NULL);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	smb.dev = dev;
++	smb.regmap = map;
++	mutex_init(&smb.usb_policy_lock);
++	bus->regs[CFG_CURRENT_LIMIT] = 0x41;
++	bus->regs[CFG_PIN] = 0x70;
++	bus->regs[IRQSTAT_E] = 0;
++
++	KUNIT_ASSERT_EQ(test, smb347_recover_after_inok(&smb), 1);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_CURRENT_LIMIT] & CFG_CURRENT_LIMIT_USB_MASK,
++			1);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_PIN] & CFG_PIN_EN_CTRL_MASK,
++			CFG_PIN_EN_CTRL_ACTIVE_LOW);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_PIN] & CFG_PIN_USB_MODE_CTRL, 0);
++	current_writes = bus->writes[CFG_CURRENT_LIMIT];
++	pin_writes = bus->writes[CFG_PIN];
++
++	KUNIT_ASSERT_EQ(test, smb347_recover_after_inok(&smb), 1);
++	KUNIT_EXPECT_EQ(test, bus->writes[CFG_CURRENT_LIMIT], current_writes);
++	KUNIT_EXPECT_EQ(test, bus->writes[CFG_PIN], pin_writes);
++}
++
++struct smb347_test_source {
++	int online;
++	int type;
++	int current_max;
++};
++
++static int smb347_test_source_get(struct power_supply *psy,
++				  enum power_supply_property prop,
++				  union power_supply_propval *val)
++{
++	struct smb347_test_source *source = power_supply_get_drvdata(psy);
++
++	switch (prop) {
++	case POWER_SUPPLY_PROP_ONLINE:
++		val->intval = source->online;
++		break;
++	case POWER_SUPPLY_PROP_USB_TYPE:
++		val->intval = source->type;
++		break;
++	case POWER_SUPPLY_PROP_CURRENT_MAX:
++		val->intval = source->current_max;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static void smb347_test_source_unregister(void *data)
++{
++	power_supply_unregister(data);
++}
++
++static void smb345_inok_applies_already_detected_source_on_attach(struct kunit *test)
++{
++	static const struct property_entry properties[] = {
++		PROPERTY_ENTRY_BOOL("power-supplies"),
++		{ }
++	};
++	static enum power_supply_property source_properties[] = {
++		POWER_SUPPLY_PROP_ONLINE,
++		POWER_SUPPLY_PROP_USB_TYPE,
++		POWER_SUPPLY_PROP_CURRENT_MAX,
++	};
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	static const struct power_supply_desc source_desc = {
++		.name = "smb345-inok-attach-test-source",
++		.type = POWER_SUPPLY_TYPE_USB,
++		.properties = source_properties,
++		.num_properties = ARRAY_SIZE(source_properties),
++		.get_property = smb347_test_source_get,
++		.usb_types = BIT(POWER_SUPPLY_USB_TYPE_DCP),
++	};
++	struct smb347_test_source *source;
++	struct power_supply_config source_config;
++	char **supplied_from;
++	struct power_supply usb = {
++		.desc = &smb347_usb_desc,
++		.num_supplies = 1,
++	};
++	struct smb347_charger smb = {
++		.id = SMB345,
++		.use_usb = true,
++		.irq_unsupported = true,
++		.enable_control = SMB3XX_CHG_ENABLE_PIN_ACTIVE_LOW,
++		.usb_hc_current_limit = 1200000,
++		.usb_policy_ready = true,
++		.soft_cold_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.soft_hot_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.hard_cold_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.hard_hot_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.soft_temp_limit_compensation = SMB3XX_SOFT_TEMP_COMPENSATE_DEFAULT,
++	};
++	struct power_supply *source_psy;
++	struct device *dev;
++	int ret;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	supplied_from = kunit_kcalloc(test, 1, sizeof(*supplied_from), GFP_KERNEL);
++	KUNIT_ASSERT_NOT_NULL(test, supplied_from);
++	supplied_from[0] = kunit_kstrdup(test, source_desc.name, GFP_KERNEL);
++	KUNIT_ASSERT_NOT_NULL(test, supplied_from[0]);
++	usb.supplied_from = supplied_from;
++	source = kunit_kzalloc(test, sizeof(*source), GFP_KERNEL);
++	KUNIT_ASSERT_NOT_NULL(test, source);
++	source->online = 1;
++	source->type = POWER_SUPPLY_USB_TYPE_DCP;
++	source->current_max = 1200000;
++	source_config = (struct power_supply_config) { .drv_data = source };
++	dev = kunit_device_register(test, "smb345-inok-attach");
++	KUNIT_ASSERT_FALSE(test, IS_ERR(dev));
++	ret = device_create_managed_software_node(dev, properties, NULL);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	source_psy = power_supply_register(dev, &source_desc, &source_config);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(source_psy));
++	ret = kunit_add_action_or_reset(test, smb347_test_source_unregister, source_psy);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	smb.dev = dev;
++	smb.regmap = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(smb.regmap));
++	smb.usb = &usb;
++	mutex_init(&smb.usb_policy_lock);
++	bus->regs[IRQSTAT_E] = 0;
++	bus->regs[CFG_CURRENT_LIMIT] = 0x41;
++
++	KUNIT_ASSERT_EQ(test, smb347_recover_after_inok(&smb), 1);
++	KUNIT_EXPECT_TRUE(test, smb.usb_online);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_CURRENT_LIMIT] &
++				CFG_CURRENT_LIMIT_USB_MASK, 4);
++	KUNIT_EXPECT_EQ(test, bus->regs[CMD_B] &
++				(CMD_B_USB_HC_MODE | CMD_B_USB_500_MODE),
++			CMD_B_USB_HC_MODE);
++}
++
++static void smb347_inok_does_not_program_disconnected_input(struct kunit *test)
++{
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct smb347_charger smb = {
++		.id = SMB345,
++		.use_usb = true,
++		.usb_online = true,
++		.irq_unsupported = true,
++		.enable_control = SMB3XX_CHG_ENABLE_PIN_ACTIVE_LOW,
++		.usb_hc_current_limit = 1500000,
++	};
++	struct device *dev;
++	struct regmap *map;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	dev = kunit_device_register(test, "smb347-inok-offline");
++	KUNIT_ASSERT_FALSE(test, IS_ERR(dev));
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	smb.dev = dev;
++	smb.regmap = map;
++	bus->regs[CFG_CURRENT_LIMIT] = 0x41;
++	bus->regs[IRQSTAT_E] = IRQSTAT_E_USBIN_UV_STAT;
++
++	KUNIT_ASSERT_EQ(test, smb347_recover_after_inok(&smb), 1);
++	KUNIT_EXPECT_FALSE(test, smb.usb_online);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_CURRENT_LIMIT], 0x41);
++	KUNIT_EXPECT_EQ(test, bus->writes[CFG_CURRENT_LIMIT], 0U);
++}
++
++static void smb347_inok_reports_connection_when_restore_write_fails(struct kunit *test)
++{
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct smb347_charger smb = {
++		.id = SMB345,
++		.use_usb = true,
++		.irq_unsupported = true,
++		.enable_control = SMB3XX_CHG_ENABLE_PIN_ACTIVE_LOW,
++		.usb_hc_current_limit = 1500000,
++	};
++	struct device *dev;
++	struct regmap *map;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	dev = kunit_device_register(test, "smb347-inok-write-error");
++	KUNIT_ASSERT_FALSE(test, IS_ERR(dev));
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	smb.dev = dev;
++	smb.regmap = map;
++	bus->regs[CFG_CURRENT_LIMIT] = 0x41;
++	bus->regs[IRQSTAT_E] = 0;
++	bus->fail_write = true;
++	bus->fail_write_reg = CFG_CURRENT_LIMIT;
++
++	KUNIT_EXPECT_EQ(test, smb347_recover_after_inok(&smb), 1);
++	KUNIT_EXPECT_TRUE(test, smb.usb_online);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_CURRENT_LIMIT], 0x41);
++}
++
++static void smb345_flo_usb_input_current_indices(struct kunit *test)
++{
++	const unsigned int *table = icl_tbl[SMB345];
++	size_t count = ARRAY_SIZE(icl_tbl[SMB345]);
++
++	KUNIT_EXPECT_EQ(test, table[3], 900000U);
++	KUNIT_EXPECT_EQ(test, table[4], 1200000U);
++	KUNIT_EXPECT_EQ(test, current_to_hw(table, count, 1200000), 4);
++	KUNIT_EXPECT_EQ(test, current_to_hw(table, count, 1199999), 3);
++}
++
++static void smb345_usb_source_policy_limits(struct kunit *test)
++{
++	struct smb347_usb_policy policy;
++
++	policy = smb347_usb_source_policy(POWER_SUPPLY_USB_TYPE_UNKNOWN,
++					  100000, 1200000);
++	KUNIT_EXPECT_EQ(test, policy.mode, 0);
++	KUNIT_EXPECT_EQ(test, policy.icl_ua, 500000U);
++
++	policy = smb347_usb_source_policy(POWER_SUPPLY_USB_TYPE_UNKNOWN,
++					  1200000, 1200000);
++	KUNIT_EXPECT_EQ(test, policy.mode, CMD_B_USB_HC_MODE);
++	KUNIT_EXPECT_EQ(test, policy.icl_ua, 1200000U);
++
++	policy = smb347_usb_source_policy(POWER_SUPPLY_USB_TYPE_SDP,
++					  500000, 1200000);
++	KUNIT_EXPECT_EQ(test, policy.mode, CMD_B_USB_500_MODE);
++	KUNIT_EXPECT_EQ(test, policy.icl_ua, 500000U);
++
++	policy = smb347_usb_source_policy(POWER_SUPPLY_USB_TYPE_SDP,
++					  250000, 1200000);
++	KUNIT_EXPECT_EQ(test, policy.mode, 0);
++
++	policy = smb347_usb_source_policy(POWER_SUPPLY_USB_TYPE_DCP, 1200000,
++					  1200000);
++	KUNIT_EXPECT_EQ(test, policy.mode, CMD_B_USB_HC_MODE);
++	KUNIT_EXPECT_EQ(test, policy.icl_ua, 1200000U);
++
++	policy = smb347_usb_source_policy(POWER_SUPPLY_USB_TYPE_CDP, 1200000,
++					  900000);
++	KUNIT_EXPECT_EQ(test, policy.mode, CMD_B_USB_HC_MODE);
++	KUNIT_EXPECT_EQ(test, policy.icl_ua, 900000U);
++}
++
++static void smb345_usb_source_policy_programs_chip(struct kunit *test)
++{
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct smb347_charger smb = {
++		.id = SMB345,
++		.usb_online = true,
++		.irq_unsupported = true,
++	};
++	struct smb347_usb_policy policy;
++	struct regmap *map;
++	struct device *dev;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	dev = kunit_device_register(test, "smb345-source-policy");
++	KUNIT_ASSERT_FALSE(test, IS_ERR(dev));
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	smb.dev = dev;
++	smb.regmap = map;
++	bus->regs[CFG_AICL] = CFG_AICL_ENABLED;
++	bus->regs[CFG_CURRENT_LIMIT] = 0x41;
++
++	policy = smb347_usb_source_policy(POWER_SUPPLY_USB_TYPE_DCP, 1200000,
++					  1200000);
++	KUNIT_ASSERT_EQ(test, smb347_apply_usb_policy_locked(&smb, policy), 0);
++	KUNIT_EXPECT_EQ(test, bus->regs[CMD_B] & 0x03, CMD_B_USB_HC_MODE);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_CURRENT_LIMIT] & 0x0f, 4);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_AICL] & CFG_AICL_ENABLED,
++			CFG_AICL_ENABLED);
++	KUNIT_EXPECT_EQ(test, smb.usb_current_max, 1200000U);
++
++	policy = smb347_usb_source_policy(POWER_SUPPLY_USB_TYPE_SDP, 500000,
++					  1200000);
++	KUNIT_ASSERT_EQ(test, smb347_apply_usb_policy_locked(&smb, policy), 0);
++	KUNIT_EXPECT_EQ(test, bus->regs[CMD_B] & 0x03, CMD_B_USB_500_MODE);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_CURRENT_LIMIT] & 0x0f, 1);
++	KUNIT_EXPECT_EQ(test, smb.usb_current_max, 500000U);
++
++	bus->fail_write = true;
++	bus->fail_write_reg = CFG_CURRENT_LIMIT;
++	policy = smb347_usb_source_policy(POWER_SUPPLY_USB_TYPE_DCP, 1200000,
++					  1200000);
++	KUNIT_EXPECT_EQ(test, smb347_apply_usb_policy_locked(&smb, policy), -EIO);
++	KUNIT_EXPECT_EQ(test, bus->regs[CMD_B] & 0x03, 0);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_AICL] & CFG_AICL_ENABLED,
++			CFG_AICL_ENABLED);
++}
++
++static void smb347_without_usb_supplier_preserves_pin_mode(struct kunit *test)
++{
++	struct smb347_test_bus *bus = kunit_kzalloc(test, sizeof(*bus), GFP_KERNEL);
++	struct smb347_charger smb = {
++		.id = SMB347,
++		.use_usb = true,
++		.irq_unsupported = true,
++		.enable_control = SMB3XX_CHG_ENABLE_PIN_ACTIVE_LOW,
++		.soft_cold_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.soft_hot_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.hard_cold_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.hard_hot_temp_limit = SMB3XX_TEMP_USE_DEFAULT,
++		.soft_temp_limit_compensation = SMB3XX_SOFT_TEMP_COMPENSATE_DEFAULT,
++	};
++	struct regmap *map;
++	struct device *dev;
++
++	KUNIT_ASSERT_NOT_NULL(test, bus);
++	dev = kunit_device_register(test, "smb347-no-source");
++	KUNIT_ASSERT_FALSE(test, IS_ERR(dev));
++	map = smb347_test_regmap(test, bus);
++	KUNIT_ASSERT_FALSE(test, IS_ERR(map));
++	smb.dev = dev;
++	smb.regmap = map;
++	bus->regs[CFG_PIN] = CFG_PIN_USB_MODE_CTRL;
++	bus->regs[IRQSTAT_E] = IRQSTAT_E_USBIN_UV_STAT;
++
++	KUNIT_ASSERT_EQ(test, smb347_hw_init(&smb), 0);
++	KUNIT_EXPECT_EQ(test, bus->regs[CFG_PIN] & CFG_PIN_USB_MODE_CTRL,
++			CFG_PIN_USB_MODE_CTRL);
++	KUNIT_EXPECT_EQ(test, bus->writes[CMD_B], 0U);
++}
++
++static struct kunit_case smb347_reset_cases[] = {
++	KUNIT_CASE(smb347_input_notification_updates_usb_extcon),
++	KUNIT_CASE(smb345_flo_usb_input_current_indices),
++	KUNIT_CASE(smb345_usb_source_policy_limits),
++	KUNIT_CASE(smb345_usb_source_policy_programs_chip),
++	KUNIT_CASE(smb347_without_usb_supplier_preserves_pin_mode),
++	KUNIT_CASE(smb347_config_read_tracks_chip_reset),
++	KUNIT_CASE(smb347_command_update_uses_chip_state),
++	KUNIT_CASE(smb347_usb_type_reports_only_known_apsd_codes),
++	KUNIT_CASE(smb347_usb_type_is_only_advertised_for_usb),
++	KUNIT_CASE(smb347_input_event_controls_charging_without_chip_irq),
++	KUNIT_CASE(smb347_input_event_read_failure_preserves_charging_state),
++	KUNIT_CASE(smb347_inok_restores_config_without_online_transition),
++	KUNIT_CASE(smb345_inok_applies_already_detected_source_on_attach),
++	KUNIT_CASE(smb347_inok_does_not_program_disconnected_input),
++	KUNIT_CASE(smb347_inok_reports_connection_when_restore_write_fails),
++	{}
++};
++
++static struct kunit_suite smb347_reset_suite = {
++	.name = "smb347-register-reset",
++	.test_cases = smb347_reset_cases,
++};
++
++kunit_test_suite(smb347_reset_suite);
+diff --git a/drivers/power/supply/smb347-charger.c b/drivers/power/supply/smb347-charger.c
+index c1b67dac8..0332d7f94 100644
+--- a/drivers/power/supply/smb347-charger.c
++++ b/drivers/power/supply/smb347-charger.c
+@@ -10,11 +10,14 @@
+ 
+ #include <linux/delay.h>
+ #include <linux/err.h>
++#include <linux/extcon-provider.h>
++#include <linux/gpio/consumer.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/init.h>
+ #include <linux/interrupt.h>
+ #include <linux/i2c.h>
++#include <linux/mutex.h>
+ #include <linux/power_supply.h>
+ #include <linux/property.h>
+ #include <linux/regmap.h>
+@@ -43,6 +46,8 @@
+ #define CFG_CURRENT_LIMIT_DC_MASK		0xf0
+ #define CFG_CURRENT_LIMIT_DC_SHIFT		4
+ #define CFG_CURRENT_LIMIT_USB_MASK		0x0f
++#define CFG_AICL				0x02
++#define CFG_AICL_ENABLED			BIT(4)
+ #define CFG_FLOAT_VOLTAGE			0x03
+ #define CFG_FLOAT_VOLTAGE_FLOAT_MASK		0x3f
+ #define CFG_FLOAT_VOLTAGE_THRESHOLD_MASK	0xc0
+@@ -56,7 +61,7 @@
+ #define CFG_PIN_EN_CTRL_ACTIVE_LOW		0x60
+ #define CFG_PIN_EN_APSD_IRQ			BIT(1)
+ #define CFG_PIN_EN_CHARGER_ERROR		BIT(2)
+-#define CFG_PIN_EN_CTRL				BIT(4)
++#define CFG_PIN_USB_MODE_CTRL			BIT(4)
+ #define CFG_THERM				0x07
+ #define CFG_THERM_SOFT_HOT_COMPENSATION_MASK	0x03
+ #define CFG_THERM_SOFT_HOT_COMPENSATION_SHIFT	0
+@@ -99,6 +104,8 @@
+ #define CMD_A_OTG_ENABLED			BIT(4)
+ #define CMD_A_ALLOW_WRITE			BIT(7)
+ #define CMD_B					0x31
++#define CMD_B_USB_HC_MODE			BIT(0)
++#define CMD_B_USB_500_MODE			BIT(1)
+ #define CMD_C					0x33
+ 
+ /* Interrupt Status registers */
+@@ -128,6 +135,12 @@
+ #define STAT_C_CHG_SHIFT			1
+ #define STAT_C_CHG_TERM				BIT(5)
+ #define STAT_C_CHARGER_ERROR			BIT(6)
++#define STAT_D					0x3e
++#define STAT_D_APSD_DONE			BIT(3)
++#define STAT_D_APSD_RESULT_MASK			GENMASK(2, 0)
++#define STAT_D_APSD_CDP				1
++#define STAT_D_APSD_DCP				2
++#define STAT_D_APSD_SDP				4
+ #define STAT_E					0x3f
+ 
+ #define SMB347_MAX_REGISTER			0x3f
+@@ -176,6 +189,9 @@
+  *		    (driver/pin controls)
+  * @inok_polarity: polarity of INOK signal which denotes presence of external
+  *		   power supply
++ * @usb_policy_lock: serializes source current updates with charger reset
++ * @usb_policy_ready: hardware configuration has completed at least once
++ * @usb_current_max: effective USB input budget selected by this driver
+  *
+  * @use_main, @use_usb, and @use_usb_otg are means to enable/disable
+  * hardware support for these. This is useful when we want to have for
+@@ -198,12 +214,18 @@ struct smb347_charger {
+ 	struct regmap		*regmap;
+ 	struct power_supply	*mains;
+ 	struct power_supply	*usb;
++	struct extcon_dev	*vbus_edev;
+ 	struct regulator_dev	*usb_rdev;
+ 	unsigned int		id;
+ 	bool			mains_online;
+ 	bool			usb_online;
+ 	bool			irq_unsupported;
+ 	bool			usb_vbus_enabled;
++	int			inok_irq;
++	/* Guards charger resets and USB source current updates. */
++	struct mutex		usb_policy_lock;
++	bool			usb_policy_ready;
++	unsigned int		usb_current_max;
+ 
+ 	unsigned int		max_charge_current;
+ 	unsigned int		max_charge_voltage;
+@@ -234,6 +256,39 @@ enum smb_charger_chipid {
+ 	NUM_CHIP_TYPES,
+ };
+ 
++struct smb347_usb_policy {
++	unsigned int icl_ua;
++	unsigned int mode;
++};
++
++static struct smb347_usb_policy
++smb347_usb_source_policy(enum power_supply_usb_type type,
++			 unsigned int source_ua, unsigned int device_ua)
++{
++	struct smb347_usb_policy policy = {
++		.icl_ua = 500000,
++	};
++	unsigned int allowed_ua = min(source_ua, device_ua);
++
++	if (type == POWER_SUPPLY_USB_TYPE_SDP) {
++		if (allowed_ua >= 500000)
++			policy.mode = CMD_B_USB_500_MODE;
++	} else if ((type == POWER_SUPPLY_USB_TYPE_CDP ||
++		    type == POWER_SUPPLY_USB_TYPE_DCP ||
++		    type == POWER_SUPPLY_USB_TYPE_UNKNOWN) && allowed_ua >= 300000) {
++		policy.icl_ua = allowed_ua;
++		policy.mode = CMD_B_USB_HC_MODE;
++	}
++
++	return policy;
++}
++
++static bool smb347_has_usb_source(struct smb347_charger *smb)
++{
++	return smb->id == SMB345 && smb->use_usb &&
++	       device_property_present(smb->dev, "summit,usb-source");
++}
++
+ /* Fast charge current in uA */
+ static const unsigned int fcc_tbl[NUM_CHIP_TYPES][8] = {
+ 	[SMB345] = {  200000,  450000,  600000,  900000,
+@@ -262,8 +317,9 @@ static const unsigned int tc_tbl[NUM_CHIP_TYPES][8] = {
+ 
+ /* Input current limit in uA */
+ static const unsigned int icl_tbl[NUM_CHIP_TYPES][10] = {
+-	[SMB345] = {  300000,  500000,  700000, 1000000, 1500000,
+-		     1800000, 2000000, 2000000, 2000000, 2000000 },
++	/* Flo's SMB345 driver uses index 4 for 1200 mA and 6 for 1800 mA. */
++	[SMB345] = {  300000,  500000,  700000,  900000, 1200000,
++		     1500000, 1800000, 2000000, 2000000, 2000000 },
+ 	[SMB347] = {  300000,  500000,  700000,  900000, 1200000,
+ 		     1500000, 1800000, 2000000, 2200000, 2500000 },
+ 	[SMB358] = {  300000,  500000,  700000, 1000000, 1500000,
+@@ -415,6 +471,40 @@ static int smb347_start_stop_charging(struct smb347_charger *smb)
+ 	return ret;
+ }
+ 
++static int smb347_handle_input_change(struct smb347_charger *smb)
++{
++	int ret;
++
++	ret = smb347_update_ps_status(smb);
++	if (ret <= 0)
++		return ret;
++
++	ret = smb347_start_stop_charging(smb);
++	if (ret < 0)
++		dev_warn(smb->dev, "failed to change charging state: %d\n", ret);
++
++	/* The input state changed even if the charging command failed. */
++	return 1;
++}
++
++static void smb347_notify_input_change(struct smb347_charger *smb)
++{
++	int ret;
++
++	if (smb->vbus_edev) {
++		ret = extcon_set_state_sync(smb->vbus_edev, EXTCON_USB,
++					    smb->usb_online);
++		if (ret < 0)
++			dev_warn(smb->dev, "failed to report USB VBUS: %d\n", ret);
++	}
++	if (smb->use_mains)
++		power_supply_changed(smb->mains);
++	if (smb->use_usb)
++		power_supply_changed(smb->usb);
++}
++
++static int smb347_irq_set(struct smb347_charger *smb, bool enable);
++
+ static int smb347_set_charge_current(struct smb347_charger *smb)
+ {
+ 	unsigned int id = smb->id;
+@@ -480,8 +570,12 @@ static int smb347_set_current_limits(struct smb347_charger *smb)
+ 	}
+ 
+ 	if (smb->usb_hc_current_limit) {
++		unsigned int usb_limit = smb->usb_hc_current_limit;
++
++		if (smb347_has_usb_source(smb))
++			usb_limit = min(usb_limit, 500000U);
+ 		ret = current_to_hw(icl_tbl[id], ARRAY_SIZE(icl_tbl[id]),
+-				    smb->usb_hc_current_limit);
++				    usb_limit);
+ 		if (ret < 0)
+ 			return ret;
+ 
+@@ -705,6 +799,18 @@ static int smb347_hw_init(struct smb347_charger *smb)
+ 	ret = smb347_set_writable(smb, true, false);
+ 	if (ret < 0)
+ 		return ret;
++	if (smb347_has_usb_source(smb)) {
++		/* A new input starts at the USB 100 mA budget. */
++		ret = regmap_update_bits(smb->regmap, CMD_B,
++					 CMD_B_USB_HC_MODE | CMD_B_USB_500_MODE, 0);
++		if (ret < 0)
++			goto fail;
++		ret = regmap_clear_bits(smb->regmap, CFG_PIN,
++					CFG_PIN_USB_MODE_CTRL);
++		if (ret < 0)
++			goto fail;
++		smb->usb_current_max = 100000;
++	}
+ 
+ 	/*
+ 	 * Program the platform specific configuration values to the device
+@@ -744,19 +850,9 @@ static int smb347_hw_init(struct smb347_charger *smb)
+ 	if (ret < 0)
+ 		goto fail;
+ 
+-	/* Activate pin control, making it writable. */
+-	switch (smb->enable_control) {
+-	case SMB3XX_CHG_ENABLE_PIN_ACTIVE_LOW:
+-	case SMB3XX_CHG_ENABLE_PIN_ACTIVE_HIGH:
+-		ret = regmap_set_bits(smb->regmap, CFG_PIN, CFG_PIN_EN_CTRL);
+-		if (ret < 0)
+-			goto fail;
+-	}
+-
+ 	/*
+-	 * Make the charging functionality controllable by a write to the
+-	 * command register unless pin control is specified in the platform
+-	 * data.
++	 * Select I2C control of the USB input mode. Charge enable control is
++	 * independent and may still use the enable pin.
+ 	 */
+ 	switch (smb->enable_control) {
+ 	case SMB3XX_CHG_ENABLE_PIN_ACTIVE_LOW:
+@@ -791,6 +887,169 @@ static int smb347_hw_init(struct smb347_charger *smb)
+ 	return ret;
+ }
+ 
++static int smb347_apply_usb_policy_locked(struct smb347_charger *smb,
++					  struct smb347_usb_policy policy)
++{
++	unsigned int aicl, old_icl;
++	int index, ret, restore_ret;
++
++	if (!smb->usb_online)
++		return 0;
++
++	index = current_to_hw(icl_tbl[smb->id], ARRAY_SIZE(icl_tbl[smb->id]),
++			      policy.icl_ua);
++	if (index < 0)
++		return index;
++
++	ret = smb347_set_writable(smb, true, false);
++	if (ret < 0)
++		return ret;
++
++	/* Lower the mode before changing the input current limit. */
++	ret = regmap_update_bits(smb->regmap, CMD_B,
++				 CMD_B_USB_HC_MODE | CMD_B_USB_500_MODE, 0);
++	if (ret < 0)
++		goto out;
++
++	ret = regmap_read(smb->regmap, CFG_CURRENT_LIMIT, &old_icl);
++	if (ret < 0)
++		goto out;
++	if ((old_icl & CFG_CURRENT_LIMIT_USB_MASK) != index) {
++		ret = regmap_read(smb->regmap, CFG_AICL, &aicl);
++		if (ret < 0)
++			goto out;
++		if (aicl & CFG_AICL_ENABLED) {
++			ret = regmap_clear_bits(smb->regmap, CFG_AICL,
++						CFG_AICL_ENABLED);
++			if (ret < 0)
++				goto out;
++		}
++		ret = regmap_update_bits(smb->regmap, CFG_CURRENT_LIMIT,
++					 CFG_CURRENT_LIMIT_USB_MASK, index);
++		if (aicl & CFG_AICL_ENABLED) {
++			msleep(20);
++			restore_ret = regmap_set_bits(smb->regmap, CFG_AICL,
++						      CFG_AICL_ENABLED);
++			if (!ret)
++				ret = restore_ret;
++		}
++		if (ret < 0)
++			goto out;
++	}
++
++	ret = regmap_update_bits(smb->regmap, CMD_B,
++				 CMD_B_USB_HC_MODE | CMD_B_USB_500_MODE,
++				 policy.mode);
++	if (!ret)
++		smb->usb_current_max = policy.mode == CMD_B_USB_HC_MODE ?
++			policy.icl_ua : policy.mode == CMD_B_USB_500_MODE ?
++			500000 : 100000;
++out:
++	restore_ret = smb347_set_writable(smb, false, false);
++	return ret ?: restore_ret;
++}
++
++static int smb347_source_get(struct smb347_charger *smb,
++			     enum power_supply_property prop,
++			     union power_supply_propval *val)
++{
++	return power_supply_get_property_from_supplier(smb->usb, prop, val);
++}
++
++static int smb347_update_usb_source_locked(struct smb347_charger *smb)
++{
++	union power_supply_propval val;
++	enum power_supply_usb_type type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
++	unsigned int source_ua = 100000;
++	int ret;
++
++	if (!smb347_has_usb_source(smb) || !smb->usb_policy_ready)
++		return 0;
++
++	ret = smb347_source_get(smb, POWER_SUPPLY_PROP_ONLINE, &val);
++	if (!ret && val.intval) {
++		ret = smb347_source_get(smb, POWER_SUPPLY_PROP_USB_TYPE, &val);
++		if (!ret) {
++			type = val.intval;
++			ret = smb347_source_get(smb, POWER_SUPPLY_PROP_CURRENT_MAX,
++						&val);
++			if (!ret && val.intval > 0)
++				source_ua = val.intval;
++			else
++				type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
++			ret = smb347_source_get(smb, POWER_SUPPLY_PROP_ONLINE,
++						&val);
++			if (ret || !val.intval) {
++				type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
++				source_ua = 100000;
++			}
++		}
++	}
++
++	return smb347_apply_usb_policy_locked(smb,
++			smb347_usb_source_policy(type, source_ua,
++						 smb->usb_hc_current_limit));
++}
++
++static void smb347_external_power_changed(struct power_supply *psy)
++{
++	struct smb347_charger *smb = power_supply_get_drvdata(psy);
++	int ret;
++
++	mutex_lock(&smb->usb_policy_lock);
++	ret = smb347_update_usb_source_locked(smb);
++	mutex_unlock(&smb->usb_policy_lock);
++	if (ret < 0)
++		dev_warn(smb->dev, "failed to apply USB source limit: %d\n", ret);
++}
++
++static int smb347_recover_after_inok(struct smb347_charger *smb)
++{
++	int changed, ret, chip_irq = -1;
++	bool source_policy = smb347_has_usb_source(smb);
++
++	changed = smb347_update_ps_status(smb);
++	if (changed < 0)
++		return changed;
++
++	if (!smb347_is_ps_online(smb)) {
++		ret = smb347_start_stop_charging(smb);
++		if (ret < 0)
++			dev_warn(smb->dev, "failed to stop charging: %d\n", ret);
++		return changed;
++	}
++
++	/* The charger's configuration RAM may have reset while VBUS was absent. */
++	if (!smb->irq_unsupported) {
++		chip_irq = to_i2c_client(smb->dev)->irq;
++		disable_irq(chip_irq);
++	}
++
++	if (source_policy)
++		mutex_lock(&smb->usb_policy_lock);
++	ret = smb347_hw_init(smb);
++	if (!ret && source_policy)
++		ret = smb347_update_usb_source_locked(smb);
++	if (source_policy)
++		mutex_unlock(&smb->usb_policy_lock);
++	if (ret < 0)
++		dev_warn(smb->dev, "failed to restore charger configuration: %d\n",
++			 ret);
++	else if (chip_irq >= 0) {
++		ret = smb347_irq_set(smb, true);
++		if (ret < 0)
++			dev_warn(smb->dev, "failed to restore charger IRQs: %d\n",
++				 ret);
++	}
++
++	if (chip_irq >= 0)
++		enable_irq(chip_irq);
++	if (ret < 0)
++		return changed > 0 ? changed : ret;
++
++	return 1;
++}
++
+ static irqreturn_t smb347_interrupt(int irq, void *data)
+ {
+ 	struct smb347_charger *smb = data;
+@@ -875,19 +1134,81 @@ static irqreturn_t smb347_interrupt(int irq, void *data)
+ 	 * was connected or disconnected.
+ 	 */
+ 	if (irqstat_e & (IRQSTAT_E_USBIN_UV_IRQ | IRQSTAT_E_DCIN_UV_IRQ)) {
+-		if (smb347_update_ps_status(smb) > 0) {
+-			smb347_start_stop_charging(smb);
+-			if (smb->use_mains)
+-				power_supply_changed(smb->mains);
+-			if (smb->use_usb)
+-				power_supply_changed(smb->usb);
+-		}
++		ret = smb347_handle_input_change(smb);
++		if (ret > 0)
++			smb347_notify_input_change(smb);
++		else if (ret < 0)
++			dev_warn(smb->dev, "failed to read input state: %d\n", ret);
+ 		handled = true;
+ 	}
+ 
+ 	return handled ? IRQ_HANDLED : IRQ_NONE;
+ }
+ 
++static irqreturn_t smb347_inok_interrupt(int irq, void *data)
++{
++	struct smb347_charger *smb = data;
++	int ret;
++
++	/* INOK is a separate pin and does not set the charger's IRQSTAT bits. */
++	usleep_range(25000, 35000);
++	ret = smb347_recover_after_inok(smb);
++	if (ret > 0)
++		smb347_notify_input_change(smb);
++	else if (ret < 0)
++		dev_warn(smb->dev, "failed to read INOK input state: %d\n", ret);
++
++	return IRQ_HANDLED;
++}
++
++static int smb347_inok_irq_init(struct smb347_charger *smb)
++{
++	struct gpio_desc *inok;
++	int irq, ret;
++
++	inok = devm_gpiod_get_optional(smb->dev, "inok", GPIOD_IN);
++	if (IS_ERR(inok))
++		return PTR_ERR(inok);
++	if (!inok)
++		return 0;
++
++	irq = gpiod_to_irq(inok);
++	if (irq < 0)
++		return irq;
++
++	ret = devm_request_threaded_irq(smb->dev, irq, NULL,
++					smb347_inok_interrupt,
++					IRQF_ONESHOT | IRQF_TRIGGER_RISING |
++					IRQF_TRIGGER_FALLING,
++					"smb347-inok", smb);
++	if (ret)
++		return ret;
++
++	smb->inok_irq = irq;
++	return 0;
++}
++
++static int smb347_vbus_extcon_init(struct smb347_charger *smb)
++{
++	static const unsigned int cables[] = { EXTCON_USB, EXTCON_NONE };
++	struct extcon_dev *edev;
++	int ret;
++
++	if (!IS_ENABLED(CONFIG_EXTCON) || !smb->use_usb ||
++	    !device_property_present(smb->dev, "inok-gpios"))
++		return 0;
++
++	/* INOK still reports VBUS when an unbound USB PHY cannot sense BSV. */
++	edev = devm_extcon_dev_allocate(smb->dev, cables);
++	if (IS_ERR(edev))
++		return PTR_ERR(edev);
++	ret = devm_extcon_dev_register(smb->dev, edev);
++	if (ret < 0)
++		return ret;
++	smb->vbus_edev = edev;
++	return extcon_set_state_sync(edev, EXTCON_USB, smb->usb_online);
++}
++
+ static int smb347_irq_set(struct smb347_charger *smb, bool enable)
+ {
+ 	int ret;
+@@ -1092,6 +1413,31 @@ static int smb347_get_charging_status(struct smb347_charger *smb,
+ 	return status;
+ }
+ 
++static int smb347_get_usb_type(struct smb347_charger *smb)
++{
++	unsigned int val;
++	int ret;
++
++	if (!smb->usb_online || smb->id == SMB358)
++		return POWER_SUPPLY_USB_TYPE_UNKNOWN;
++	ret = regmap_read(smb->regmap, STAT_D, &val);
++	if (ret)
++		return ret;
++	if (!(val & STAT_D_APSD_DONE))
++		return POWER_SUPPLY_USB_TYPE_UNKNOWN;
++
++	switch (val & STAT_D_APSD_RESULT_MASK) {
++	case STAT_D_APSD_CDP:
++		return POWER_SUPPLY_USB_TYPE_CDP;
++	case STAT_D_APSD_DCP:
++		return POWER_SUPPLY_USB_TYPE_DCP;
++	case STAT_D_APSD_SDP:
++		return POWER_SUPPLY_USB_TYPE_SDP;
++	default:
++		return POWER_SUPPLY_USB_TYPE_UNKNOWN;
++	}
++}
++
+ static int smb347_get_property_locked(struct power_supply *psy,
+ 				      enum power_supply_property prop,
+ 				      union power_supply_propval *val)
+@@ -1100,6 +1446,15 @@ static int smb347_get_property_locked(struct power_supply *psy,
+ 	int ret;
+ 
+ 	switch (prop) {
++	case POWER_SUPPLY_PROP_USB_TYPE:
++		if (psy->desc->type != POWER_SUPPLY_TYPE_USB)
++			return -EINVAL;
++		ret = smb347_get_usb_type(smb);
++		if (ret < 0)
++			return ret;
++		val->intval = ret;
++		break;
++
+ 	case POWER_SUPPLY_PROP_STATUS:
+ 		ret = smb347_get_charging_status(smb, psy);
+ 		if (ret < 0)
+@@ -1188,6 +1543,15 @@ static enum power_supply_property smb347_properties[] = {
+ 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
+ };
+ 
++static enum power_supply_property smb347_usb_properties[] = {
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_CHARGE_TYPE,
++	POWER_SUPPLY_PROP_ONLINE,
++	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
++	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
++	POWER_SUPPLY_PROP_USB_TYPE,
++};
++
+ static bool smb347_volatile_reg(struct device *dev, unsigned int reg)
+ {
+ 	switch (reg) {
+@@ -1199,6 +1563,7 @@ static bool smb347_volatile_reg(struct device *dev, unsigned int reg)
+ 	case STAT_A:
+ 	case STAT_B:
+ 	case STAT_C:
++	case STAT_D:
+ 	case STAT_E:
+ 		return true;
+ 	}
+@@ -1211,6 +1576,7 @@ static bool smb347_readable_reg(struct device *dev, unsigned int reg)
+ 	switch (reg) {
+ 	case CFG_CHARGE_CURRENT:
+ 	case CFG_CURRENT_LIMIT:
++	case CFG_AICL:
+ 	case CFG_FLOAT_VOLTAGE:
+ 	case CFG_STAT:
+ 	case CFG_PIN:
+@@ -1488,7 +1854,8 @@ static const struct regmap_config smb347_regmap = {
+ 	.max_register	= SMB347_MAX_REGISTER,
+ 	.volatile_reg	= smb347_volatile_reg,
+ 	.readable_reg	= smb347_readable_reg,
+-	.cache_type	= REGCACHE_MAPLE,
++	/* Configuration RAM and commands can change on input power loss. */
++	.cache_type	= REGCACHE_NONE,
+ };
+ 
+ static const struct regulator_ops smb347_usb_vbus_regulator_ops = {
+@@ -1511,8 +1878,13 @@ static const struct power_supply_desc smb347_usb_desc = {
+ 	.name		= "smb347-usb",
+ 	.type		= POWER_SUPPLY_TYPE_USB,
+ 	.get_property	= smb347_get_property,
+-	.properties	= smb347_properties,
+-	.num_properties	= ARRAY_SIZE(smb347_properties),
++	.external_power_changed = smb347_external_power_changed,
++	.properties	= smb347_usb_properties,
++	.num_properties	= ARRAY_SIZE(smb347_usb_properties),
++	.usb_types	= BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN) |
++			  BIT(POWER_SUPPLY_USB_TYPE_SDP) |
++			  BIT(POWER_SUPPLY_USB_TYPE_CDP) |
++			  BIT(POWER_SUPPLY_USB_TYPE_DCP),
+ };
+ 
+ static const struct regulator_desc smb347_usb_vbus_regulator_desc = {
+@@ -1542,6 +1914,8 @@ static int smb347_probe(struct i2c_client *client)
+ 		return -ENOMEM;
+ 	smb->dev = &client->dev;
+ 	smb->id = id->driver_data;
++	smb->inok_irq = -1;
++	mutex_init(&smb->usb_policy_lock);
+ 	i2c_set_clientdata(client, smb);
+ 
+ 	smb347_dt_parse_dev_info(smb);
+@@ -1575,10 +1949,23 @@ static int smb347_probe(struct i2c_client *client)
+ 	ret = smb347_hw_init(smb);
+ 	if (ret < 0)
+ 		return ret;
++	smb->usb_policy_ready = true;
++	if (smb347_has_usb_source(smb))
++		smb347_external_power_changed(smb->usb);
+ 
+ 	ret = smb347_irq_init(smb, client);
+ 	if (ret)
+ 		return ret;
++	ret = smb347_vbus_extcon_init(smb);
++	if (ret) {
++		smb347_irq_disable(smb);
++		return ret;
++	}
++	ret = smb347_inok_irq_init(smb);
++	if (ret) {
++		smb347_irq_disable(smb);
++		return ret;
++	}
+ 
+ 	usb_rdev_cfg.dev = dev;
+ 	usb_rdev_cfg.driver_data = smb;
+@@ -1599,6 +1986,10 @@ static void smb347_remove(struct i2c_client *client)
+ {
+ 	struct smb347_charger *smb = i2c_get_clientdata(client);
+ 
++	if (smb->inok_irq >= 0) {
++		devm_free_irq(smb->dev, smb->inok_irq, smb);
++		smb->inok_irq = -1;
++	}
+ 	smb347_usb_vbus_regulator_disable(smb->usb_rdev);
+ 	smb347_irq_disable(smb);
+ }
+@@ -1640,3 +2031,7 @@ MODULE_AUTHOR("Bruce E. Robertson <bruce.e.robertson@intel.com>");
+ MODULE_AUTHOR("Mika Westerberg <mika.westerberg@linux.intel.com>");
+ MODULE_DESCRIPTION("SMB347 battery charger driver");
+ MODULE_LICENSE("GPL");
++
++#if IS_ENABLED(CONFIG_CHARGER_SMB347_KUNIT_TEST)
++#include "smb347-charger-test.c"
++#endif
+diff --git a/drivers/usb/chipidea/Kconfig b/drivers/usb/chipidea/Kconfig
+index bab45bc62..80ebbe1a5 100644
+--- a/drivers/usb/chipidea/Kconfig
++++ b/drivers/usb/chipidea/Kconfig
+@@ -43,6 +43,21 @@ config USB_CHIPIDEA_MSM
+ 	tristate "Enable MSM hsusb glue driver" if EXPERT
+ 	default USB_CHIPIDEA
+ 
++config USB_CHIPIDEA_MSM_BC12
++	bool "Qualcomm APQ8064 USB source detection" if EXPERT || KUNIT
++	depends on USB_CHIPIDEA_MSM=y && POWER_SUPPLY=y
++	default y if ARCH_QCOM
++	help
++	  Detect SDP, CDP and DCP sources with the APQ8064 28 nm USB PHY
++	  before the USB gadget joins the bus. Report the result through
++	  the power supply subsystem so a charger can set its input current
++	  according to the source. Other Qualcomm PHYs are unaffected.
++
++config USB_CHIPIDEA_MSM_BC12_KUNIT_TEST
++	bool "Test MSM USB source detection" if !KUNIT_ALL_TESTS
++	depends on KUNIT && USB_CHIPIDEA_MSM_BC12
++	default KUNIT_ALL_TESTS
++
+ config USB_CHIPIDEA_NPCM
+ 	tristate "Enable NPCM hsusb glue driver" if EXPERT
+ 	default USB_CHIPIDEA
+diff --git a/drivers/usb/chipidea/Makefile b/drivers/usb/chipidea/Makefile
+index 718cb2460..64d7061be 100644
+--- a/drivers/usb/chipidea/Makefile
++++ b/drivers/usb/chipidea/Makefile
+@@ -13,6 +13,8 @@ ci_hdrc-$(CONFIG_USB_OTG_FSM)		+= otg_fsm.o
+ 
+ obj-$(CONFIG_USB_CHIPIDEA_GENERIC)	+= ci_hdrc_usb2.o
+ obj-$(CONFIG_USB_CHIPIDEA_MSM)		+= ci_hdrc_msm.o
++ci_hdrc_msm-y				:= ci_hdrc_msm_glue.o
++ci_hdrc_msm-$(CONFIG_USB_CHIPIDEA_MSM_BC12) += ci_hdrc_msm_bc12.o
+ obj-$(CONFIG_USB_CHIPIDEA_NPCM)		+= ci_hdrc_npcm.o
+ obj-$(CONFIG_USB_CHIPIDEA_PCI)		+= ci_hdrc_pci.o
+ obj-$(CONFIG_USB_CHIPIDEA_IMX)		+= usbmisc_imx.o ci_hdrc_imx.o
+diff --git a/drivers/usb/chipidea/ci.h b/drivers/usb/chipidea/ci.h
+index 97437de52..ac83fee02 100644
+--- a/drivers/usb/chipidea/ci.h
++++ b/drivers/usb/chipidea/ci.h
+@@ -197,6 +197,7 @@ struct hw_bank {
+  * @test_mode: the selected test mode
+  * @platdata: platform specific information supplied by parent device
+  * @vbus_active: is VBUS active
++ * @gadget_pm_active: gadget connect owns a runtime PM reference
+  * @ulpi: pointer to ULPI device, if any
+  * @ulpi_ops: ULPI read/write ops for this device
+  * @phy: pointer to PHY, if any
+@@ -251,6 +252,7 @@ struct ci_hdrc {
+ 
+ 	struct ci_hdrc_platform_data	*platdata;
+ 	int				vbus_active;
++	bool				gadget_pm_active;
+ 	struct ulpi			*ulpi;
+ 	struct ulpi_ops 		ulpi_ops;
+ 	struct phy			*phy;
+diff --git a/drivers/usb/chipidea/ci_hdrc_msm.c b/drivers/usb/chipidea/ci_hdrc_msm.c
+deleted file mode 100644
+index 3ab3daa78..000000000
+--- a/drivers/usb/chipidea/ci_hdrc_msm.c
++++ /dev/null
+@@ -1,307 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0
+-/* Copyright (c) 2010, Code Aurora Forum. All rights reserved. */
+-
+-#include <linux/module.h>
+-#include <linux/platform_device.h>
+-#include <linux/pm_runtime.h>
+-#include <linux/usb/chipidea.h>
+-#include <linux/clk.h>
+-#include <linux/reset.h>
+-#include <linux/mfd/syscon.h>
+-#include <linux/regmap.h>
+-#include <linux/io.h>
+-#include <linux/reset-controller.h>
+-#include <linux/extcon.h>
+-#include <linux/of.h>
+-
+-#include "ci.h"
+-
+-#define HS_PHY_AHB_MODE			0x0098
+-
+-#define HS_PHY_GENCONFIG		0x009c
+-#define HS_PHY_TXFIFO_IDLE_FORCE_DIS	BIT(4)
+-
+-#define HS_PHY_GENCONFIG_2		0x00a0
+-#define HS_PHY_SESS_VLD_CTRL_EN		BIT(7)
+-#define HS_PHY_ULPI_TX_PKT_EN_CLR_FIX	BIT(19)
+-
+-#define HSPHY_SESS_VLD_CTRL		BIT(25)
+-
+-/* Vendor base starts at 0x200 beyond CI base */
+-#define HS_PHY_CTRL			0x0040
+-#define HS_PHY_SEC_CTRL			0x0078
+-#define HS_PHY_DIG_CLAMP_N		BIT(16)
+-#define HS_PHY_POR_ASSERT		BIT(0)
+-
+-struct ci_hdrc_msm {
+-	struct platform_device *ci;
+-	struct clk *core_clk;
+-	struct clk *iface_clk;
+-	struct clk *fs_clk;
+-	struct ci_hdrc_platform_data pdata;
+-	struct reset_controller_dev rcdev;
+-	bool secondary_phy;
+-	bool hsic;
+-	void __iomem *base;
+-};
+-
+-static int
+-ci_hdrc_msm_por_reset(struct reset_controller_dev *r, unsigned long id)
+-{
+-	struct ci_hdrc_msm *ci_msm = container_of(r, struct ci_hdrc_msm, rcdev);
+-	void __iomem *addr = ci_msm->base;
+-	u32 val;
+-
+-	if (id)
+-		addr += HS_PHY_SEC_CTRL;
+-	else
+-		addr += HS_PHY_CTRL;
+-
+-	val = readl_relaxed(addr);
+-	val |= HS_PHY_POR_ASSERT;
+-	writel(val, addr);
+-	/*
+-	 * wait for minimum 10 microseconds as suggested by manual.
+-	 * Use a slightly larger value since the exact value didn't
+-	 * work 100% of the time.
+-	 */
+-	udelay(12);
+-	val &= ~HS_PHY_POR_ASSERT;
+-	writel(val, addr);
+-
+-	return 0;
+-}
+-
+-static const struct reset_control_ops ci_hdrc_msm_reset_ops = {
+-	.reset = ci_hdrc_msm_por_reset,
+-};
+-
+-static int ci_hdrc_msm_notify_event(struct ci_hdrc *ci, unsigned event)
+-{
+-	struct device *dev = ci->dev->parent;
+-	struct ci_hdrc_msm *msm_ci = dev_get_drvdata(dev);
+-	int ret;
+-
+-	switch (event) {
+-	case CI_HDRC_CONTROLLER_RESET_EVENT:
+-		dev_dbg(dev, "CI_HDRC_CONTROLLER_RESET_EVENT received\n");
+-
+-		hw_phymode_configure(ci);
+-		if (msm_ci->secondary_phy) {
+-			u32 val = readl_relaxed(msm_ci->base + HS_PHY_SEC_CTRL);
+-			val |= HS_PHY_DIG_CLAMP_N;
+-			writel_relaxed(val, msm_ci->base + HS_PHY_SEC_CTRL);
+-		}
+-
+-		ret = phy_init(ci->phy);
+-		if (ret)
+-			return ret;
+-
+-		ret = phy_power_on(ci->phy);
+-		if (ret) {
+-			phy_exit(ci->phy);
+-			return ret;
+-		}
+-
+-		/* use AHB transactor, allow posted data writes */
+-		hw_write_id_reg(ci, HS_PHY_AHB_MODE, 0xffffffff, 0x8);
+-
+-		/* workaround for rx buffer collision issue */
+-		hw_write_id_reg(ci, HS_PHY_GENCONFIG,
+-				HS_PHY_TXFIFO_IDLE_FORCE_DIS, 0);
+-
+-		if (!msm_ci->hsic)
+-			hw_write_id_reg(ci, HS_PHY_GENCONFIG_2,
+-					HS_PHY_ULPI_TX_PKT_EN_CLR_FIX, 0);
+-
+-		if (!IS_ERR(ci->platdata->vbus_extcon.edev) || ci->role_switch) {
+-			hw_write_id_reg(ci, HS_PHY_GENCONFIG_2,
+-					HS_PHY_SESS_VLD_CTRL_EN,
+-					HS_PHY_SESS_VLD_CTRL_EN);
+-			hw_write(ci, OP_USBCMD, HSPHY_SESS_VLD_CTRL,
+-				 HSPHY_SESS_VLD_CTRL);
+-
+-		}
+-		break;
+-	case CI_HDRC_CONTROLLER_STOPPED_EVENT:
+-		dev_dbg(dev, "CI_HDRC_CONTROLLER_STOPPED_EVENT received\n");
+-		phy_power_off(ci->phy);
+-		phy_exit(ci->phy);
+-		break;
+-	default:
+-		dev_dbg(dev, "unknown ci_hdrc event\n");
+-		break;
+-	}
+-
+-	return 0;
+-}
+-
+-static int ci_hdrc_msm_mux_phy(struct ci_hdrc_msm *ci,
+-			       struct platform_device *pdev)
+-{
+-	struct regmap *regmap;
+-	struct device *dev = &pdev->dev;
+-	struct of_phandle_args args;
+-	u32 val;
+-	int ret;
+-
+-	ret = of_parse_phandle_with_fixed_args(dev->of_node, "phy-select", 2, 0,
+-					       &args);
+-	if (ret)
+-		return 0;
+-
+-	regmap = syscon_node_to_regmap(args.np);
+-	of_node_put(args.np);
+-	if (IS_ERR(regmap))
+-		return PTR_ERR(regmap);
+-
+-	ret = regmap_write(regmap, args.args[0], args.args[1]);
+-	if (ret)
+-		return ret;
+-
+-	ci->secondary_phy = !!args.args[1];
+-	if (ci->secondary_phy) {
+-		val = readl_relaxed(ci->base + HS_PHY_SEC_CTRL);
+-		val |= HS_PHY_DIG_CLAMP_N;
+-		writel_relaxed(val, ci->base + HS_PHY_SEC_CTRL);
+-	}
+-
+-	return 0;
+-}
+-
+-static int ci_hdrc_msm_probe(struct platform_device *pdev)
+-{
+-	struct ci_hdrc_msm *ci;
+-	struct platform_device *plat_ci;
+-	struct clk *clk;
+-	struct reset_control *reset;
+-	int ret;
+-	struct device_node *ulpi_node, *phy_node;
+-
+-	dev_dbg(&pdev->dev, "ci_hdrc_msm_probe\n");
+-
+-	ci = devm_kzalloc(&pdev->dev, sizeof(*ci), GFP_KERNEL);
+-	if (!ci)
+-		return -ENOMEM;
+-	platform_set_drvdata(pdev, ci);
+-
+-	ci->pdata.name = "ci_hdrc_msm";
+-	ci->pdata.capoffset = DEF_CAPOFFSET;
+-	ci->pdata.flags	= CI_HDRC_REGS_SHARED | CI_HDRC_DISABLE_STREAMING |
+-			  CI_HDRC_OVERRIDE_AHB_BURST |
+-			  CI_HDRC_OVERRIDE_PHY_CONTROL;
+-	ci->pdata.notify_event = ci_hdrc_msm_notify_event;
+-
+-	reset = devm_reset_control_get(&pdev->dev, "core");
+-	if (IS_ERR(reset))
+-		return PTR_ERR(reset);
+-
+-	ci->core_clk = clk = devm_clk_get(&pdev->dev, "core");
+-	if (IS_ERR(clk))
+-		return PTR_ERR(clk);
+-
+-	ci->iface_clk = clk = devm_clk_get(&pdev->dev, "iface");
+-	if (IS_ERR(clk))
+-		return PTR_ERR(clk);
+-
+-	ci->fs_clk = clk = devm_clk_get_optional(&pdev->dev, "fs");
+-	if (IS_ERR(clk))
+-		return PTR_ERR(clk);
+-
+-	ci->base = devm_platform_ioremap_resource(pdev, 1);
+-	if (IS_ERR(ci->base))
+-		return PTR_ERR(ci->base);
+-
+-	ci->rcdev.owner = THIS_MODULE;
+-	ci->rcdev.ops = &ci_hdrc_msm_reset_ops;
+-	ci->rcdev.of_node = pdev->dev.of_node;
+-	ci->rcdev.nr_resets = 2;
+-	ret = devm_reset_controller_register(&pdev->dev, &ci->rcdev);
+-	if (ret)
+-		return ret;
+-
+-	ret = clk_prepare_enable(ci->fs_clk);
+-	if (ret)
+-		return ret;
+-
+-	reset_control_assert(reset);
+-	usleep_range(10000, 12000);
+-	reset_control_deassert(reset);
+-
+-	clk_disable_unprepare(ci->fs_clk);
+-
+-	ret = clk_prepare_enable(ci->core_clk);
+-	if (ret)
+-		return ret;
+-
+-	ret = clk_prepare_enable(ci->iface_clk);
+-	if (ret)
+-		goto err_iface;
+-
+-	ret = ci_hdrc_msm_mux_phy(ci, pdev);
+-	if (ret)
+-		goto err_mux;
+-
+-	ulpi_node = of_get_child_by_name(pdev->dev.of_node, "ulpi");
+-	if (ulpi_node) {
+-		phy_node = of_get_next_available_child(ulpi_node, NULL);
+-		ci->hsic = of_device_is_compatible(phy_node, "qcom,usb-hsic-phy");
+-		of_node_put(phy_node);
+-	}
+-	of_node_put(ulpi_node);
+-
+-	plat_ci = ci_hdrc_add_device(&pdev->dev, pdev->resource,
+-				     pdev->num_resources, &ci->pdata);
+-	if (IS_ERR(plat_ci)) {
+-		ret = PTR_ERR(plat_ci);
+-		if (ret != -EPROBE_DEFER)
+-			dev_err(&pdev->dev, "ci_hdrc_add_device failed!\n");
+-		goto err_mux;
+-	}
+-
+-	ci->ci = plat_ci;
+-
+-	pm_runtime_set_active(&pdev->dev);
+-	pm_runtime_no_callbacks(&pdev->dev);
+-	pm_runtime_enable(&pdev->dev);
+-
+-	return 0;
+-
+-err_mux:
+-	clk_disable_unprepare(ci->iface_clk);
+-err_iface:
+-	clk_disable_unprepare(ci->core_clk);
+-	return ret;
+-}
+-
+-static void ci_hdrc_msm_remove(struct platform_device *pdev)
+-{
+-	struct ci_hdrc_msm *ci = platform_get_drvdata(pdev);
+-
+-	pm_runtime_disable(&pdev->dev);
+-	ci_hdrc_remove_device(ci->ci);
+-	clk_disable_unprepare(ci->iface_clk);
+-	clk_disable_unprepare(ci->core_clk);
+-}
+-
+-static const struct of_device_id msm_ci_dt_match[] = {
+-	{ .compatible = "qcom,ci-hdrc", },
+-	{ }
+-};
+-MODULE_DEVICE_TABLE(of, msm_ci_dt_match);
+-
+-static struct platform_driver ci_hdrc_msm_driver = {
+-	.probe = ci_hdrc_msm_probe,
+-	.remove = ci_hdrc_msm_remove,
+-	.driver = {
+-		.name = "msm_hsusb",
+-		.of_match_table = msm_ci_dt_match,
+-	},
+-};
+-
+-module_platform_driver(ci_hdrc_msm_driver);
+-
+-MODULE_ALIAS("platform:msm_hsusb");
+-MODULE_ALIAS("platform:ci13xxx_msm");
+-MODULE_DESCRIPTION("ChipIdea Highspeed Dual Role Controller");
+-MODULE_LICENSE("GPL v2");
+diff --git a/drivers/usb/chipidea/ci_hdrc_msm_bc12.c b/drivers/usb/chipidea/ci_hdrc_msm_bc12.c
+new file mode 100644
+index 000000000..ad7000830
+--- /dev/null
++++ b/drivers/usb/chipidea/ci_hdrc_msm_bc12.c
+@@ -0,0 +1,211 @@
++// SPDX-License-Identifier: GPL-2.0
++/* Battery Charging 1.2 detection on the APQ8064 Synopsys 28 nm PHY. */
++
++#include <linux/errno.h>
++#include <linux/bits.h>
++#include <linux/ulpi/regs.h>
++
++#include "ci_hdrc_msm_bc12.h"
++
++#define SNPS_CHG_CTRL_SET	0x85
++#define SNPS_CHG_CTRL_CLR	0x86
++#define SNPS_CHG_STATUS		0x87
++#define SNPS_ALT_INT_LATCH_CLR	0x92
++#define SNPS_ALT_INT_EN_CLR	0x95
++
++bool ci_msm_bc12_source_complete(struct ci_msm_bc12_source_state *source,
++				  bool vbus_active,
++				  enum ci_msm_bc12_type type)
++{
++	enum power_supply_usb_type usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
++	int current_max = 0;
++	bool changed;
++
++	if (vbus_active) {
++		current_max = 100000;
++		switch (type) {
++		case CI_MSM_BC12_SDP:
++			usb_type = POWER_SUPPLY_USB_TYPE_SDP;
++			break;
++		case CI_MSM_BC12_CDP:
++			usb_type = POWER_SUPPLY_USB_TYPE_CDP;
++			current_max = 1200000;
++			break;
++		case CI_MSM_BC12_DCP:
++			usb_type = POWER_SUPPLY_USB_TYPE_DCP;
++			current_max = 1200000;
++			break;
++		case CI_MSM_BC12_PROPRIETARY:
++			current_max = 1200000;
++			break;
++		default:
++			break;
++		}
++	}
++
++	changed = source->online != vbus_active ||
++		  source->usb_type != usb_type ||
++		  source->current_max != current_max;
++	source->online = vbus_active;
++	source->usb_type = usb_type;
++	source->current_max = current_max;
++	return changed;
++}
++
++bool ci_msm_bc12_source_needs_detection(
++	const struct ci_msm_bc12_source_state *source,
++	bool vbus_active, bool gadget_role)
++{
++	return vbus_active && gadget_role &&
++		(!source->online ||
++		 (source->usb_type == POWER_SUPPLY_USB_TYPE_UNKNOWN &&
++		  source->current_max <= 100000));
++}
++
++bool ci_msm_bc12_source_stop(struct ci_msm_bc12_source_state *source,
++			     bool vbus_active, bool gadget_role)
++{
++	if (vbus_active && gadget_role) {
++		if (source->online &&
++		    source->usb_type == POWER_SUPPLY_USB_TYPE_SDP &&
++		    source->current_max > 100000) {
++			source->current_max = 100000;
++			return true;
++		}
++		return false;
++	}
++	if (!source->online &&
++	    source->usb_type == POWER_SUPPLY_USB_TYPE_UNKNOWN &&
++	    !source->current_max)
++		return false;
++
++	source->online = false;
++	source->usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
++	source->current_max = 0;
++	return true;
++}
++
++static int bc12_clear(const struct ci_msm_bc12_io *io)
++{
++	int ret, first;
++
++	first = io->write(io->context, SNPS_CHG_CTRL_CLR, 0x3f);
++	ret = io->write(io->context, SNPS_ALT_INT_LATCH_CLR, 0x1f);
++	if (!first)
++		first = ret;
++	ret = io->write(io->context, SNPS_ALT_INT_EN_CLR, 0x1f);
++	if (!first)
++		first = ret;
++
++	return first;
++}
++
++int ci_msm_bc12_detect(const struct ci_msm_bc12_io *io,
++		       enum ci_msm_bc12_type *type)
++{
++	int func, otg, status, ret, cleanup;
++	unsigned int i;
++	bool primary;
++
++	*type = CI_MSM_BC12_UNKNOWN;
++	func = io->read(io->context, ULPI_FUNC_CTRL);
++	if (func < 0)
++		return func;
++	/* A PHY reset may clear SUSPENDM; keep ULPI active for detection. */
++	func |= ULPI_FUNC_CTRL_SUSPENDM;
++	otg = io->read(io->context, ULPI_OTG_CTRL);
++	if (otg < 0)
++		return otg;
++
++	ret = io->write(io->context, ULPI_FUNC_CTRL,
++			(func & ~ULPI_FUNC_CTRL_OPMODE_MASK) |
++			ULPI_FUNC_CTRL_OPMODE_NONDRIVING);
++	if (ret)
++		goto restore;
++	ret = io->write(io->context, ULPI_CLR(ULPI_OTG_CTRL),
++			ULPI_OTG_CTRL_DP_PULLDOWN | ULPI_OTG_CTRL_DM_PULLDOWN);
++	if (ret)
++		goto restore;
++	ret = bc12_clear(io);
++	if (ret)
++		goto restore;
++	io->wait_ms(io->context, 1);
++
++	ret = io->write(io->context, SNPS_CHG_CTRL_SET, 0x10);
++	if (ret)
++		goto restore;
++	for (i = 0; i < 15; i++) {
++		io->wait_ms(io->context, 50);
++		status = io->read(io->context, SNPS_CHG_STATUS);
++		if (status < 0) {
++			ret = status;
++			goto restore;
++		}
++		if (status & BIT(1))
++			break;
++	}
++	ret = io->write(io->context, SNPS_CHG_CTRL_CLR, 0x10);
++	if (ret)
++		goto restore;
++	ret = io->write(io->context, SNPS_CHG_CTRL_SET, 0x02);
++	if (ret)
++		goto restore;
++	ret = io->write(io->context, SNPS_CHG_CTRL_SET, 0x01);
++	if (ret)
++		goto restore;
++	io->wait_ms(io->context, 50);
++	status = io->read(io->context, SNPS_CHG_STATUS);
++	if (status < 0) {
++		ret = status;
++		goto restore;
++	}
++	primary = !!(status & BIT(0));
++	status = io->line_state(io->context);
++	if (status < 0) {
++		ret = status;
++		goto restore;
++	}
++	if (status) {
++		*type = CI_MSM_BC12_PROPRIETARY;
++		goto restore;
++	}
++	if (!primary) {
++		*type = CI_MSM_BC12_SDP;
++		goto restore;
++	}
++
++	ret = io->write(io->context, SNPS_CHG_CTRL_SET, 0x08);
++	if (ret)
++		goto restore;
++	ret = io->write(io->context, SNPS_CHG_CTRL_SET, 0x02);
++	if (ret)
++		goto restore;
++	ret = io->write(io->context, SNPS_CHG_CTRL_SET, 0x01);
++	if (ret)
++		goto restore;
++	io->wait_ms(io->context, 40);
++	status = io->read(io->context, SNPS_CHG_STATUS);
++	if (status < 0) {
++		ret = status;
++		goto restore;
++	}
++	*type = status & BIT(0) ? CI_MSM_BC12_DCP : CI_MSM_BC12_CDP;
++
++restore:
++	cleanup = bc12_clear(io);
++	if (!ret)
++		ret = cleanup;
++	cleanup = io->write(io->context, ULPI_OTG_CTRL, otg);
++	if (!ret)
++		ret = cleanup;
++	cleanup = io->write(io->context, ULPI_FUNC_CTRL, func);
++	if (!ret)
++		ret = cleanup;
++	if (ret)
++		*type = CI_MSM_BC12_UNKNOWN;
++	return ret;
++}
++
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12_KUNIT_TEST)
++#include "ci_hdrc_msm_bc12_test.c"
++#endif
+diff --git a/drivers/usb/chipidea/ci_hdrc_msm_bc12.h b/drivers/usb/chipidea/ci_hdrc_msm_bc12.h
+new file mode 100644
+index 000000000..e831c9821
+--- /dev/null
++++ b/drivers/usb/chipidea/ci_hdrc_msm_bc12.h
+@@ -0,0 +1,43 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef __CI_HDRC_MSM_BC12_H
++#define __CI_HDRC_MSM_BC12_H
++
++#include <linux/types.h>
++#include <linux/power_supply.h>
++
++enum ci_msm_bc12_type {
++	CI_MSM_BC12_UNKNOWN,
++	CI_MSM_BC12_SDP,
++	CI_MSM_BC12_CDP,
++	CI_MSM_BC12_DCP,
++	CI_MSM_BC12_PROPRIETARY,
++};
++
++struct ci_msm_bc12_source_state {
++	bool online;
++	enum power_supply_usb_type usb_type;
++	int current_max;
++};
++
++bool ci_msm_bc12_source_complete(struct ci_msm_bc12_source_state *source,
++				  bool vbus_active,
++				  enum ci_msm_bc12_type type);
++bool ci_msm_bc12_source_needs_detection(
++	const struct ci_msm_bc12_source_state *source,
++	bool vbus_active, bool gadget_role);
++
++bool ci_msm_bc12_source_stop(struct ci_msm_bc12_source_state *source,
++			     bool vbus_active, bool gadget_role);
++
++struct ci_msm_bc12_io {
++	void *context;
++	int (*read)(void *context, u8 register_address);
++	int (*write)(void *context, u8 register_address, u8 value);
++	int (*line_state)(void *context);
++	void (*wait_ms)(void *context, unsigned int milliseconds);
++};
++
++int ci_msm_bc12_detect(const struct ci_msm_bc12_io *io,
++		       enum ci_msm_bc12_type *type);
++
++#endif
+diff --git a/drivers/usb/chipidea/ci_hdrc_msm_bc12_test.c b/drivers/usb/chipidea/ci_hdrc_msm_bc12_test.c
+new file mode 100644
+index 000000000..e8e4fb1f5
+--- /dev/null
++++ b/drivers/usb/chipidea/ci_hdrc_msm_bc12_test.c
+@@ -0,0 +1,298 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <kunit/test.h>
++
++struct bc12_test_state {
++	u8 function_control;
++	u8 otg_control;
++	u8 phase;
++	bool dcd;
++	bool primary;
++	bool secondary;
++	bool proprietary;
++	bool failed;
++	bool primary_cleared;
++	bool phy_suspended;
++	unsigned int wait_total_ms;
++};
++
++static int bc12_test_read(void *context, u8 address)
++{
++	struct bc12_test_state *state = context;
++
++	if (address == 0x04)
++		return state->function_control;
++	if (address == 0x0a)
++		return state->otg_control;
++	if (address == 0x87) {
++		if (state->phase == 1)
++			return state->dcd ? BIT(1) : 0;
++		if (state->phase == 2)
++			return state->primary ? BIT(0) : 0;
++		if (state->phase == 3)
++			return state->secondary ? BIT(0) : 0;
++	}
++	return -EINVAL;
++}
++
++static int bc12_test_write(void *context, u8 address, u8 value)
++{
++	struct bc12_test_state *state = context;
++
++	if (state->phy_suspended)
++		return -ETIMEDOUT;
++	if (address == ULPI_FUNC_CTRL &&
++	    (value & ULPI_FUNC_CTRL_OPMODE_MASK) ==
++	    ULPI_FUNC_CTRL_OPMODE_NONDRIVING &&
++	    !(value & ULPI_FUNC_CTRL_SUSPENDM))
++		state->phy_suspended = true;
++
++	if (address == 0x86 && value == 0x3f)
++		state->primary_cleared = false;
++	if (address == 0x86 && value == 0x03)
++		state->primary_cleared = true;
++	/* The PHY must stay active between primary and secondary detection. */
++	if (address == 0x85 && value == 0x08 && state->primary_cleared)
++		return -ETIMEDOUT;
++
++	if (address == 0x85 && value == 0x10)
++		state->phase = 1;
++	else if (address == 0x85 && value == 0x02 && state->phase == 1)
++		state->phase = 2;
++	else if (address == 0x85 && value == 0x08)
++		state->phase = 3;
++	if (address == 0x04)
++		state->function_control = value;
++	if (address == 0x0a)
++		state->otg_control = value;
++	if (address == 0x85 && value == 0x01 && state->failed)
++		return -EIO;
++	return 0;
++}
++
++static void bc12_test_wait(void *context, unsigned int milliseconds)
++{
++	struct bc12_test_state *state = context;
++
++	state->wait_total_ms += milliseconds;
++}
++
++static int bc12_test_line_state(void *context)
++{
++	struct bc12_test_state *state = context;
++
++	return state->proprietary ? 1 : 0;
++}
++
++static void bc12_test_classification(struct kunit *test)
++{
++	struct bc12_test_state state = {
++		.function_control = 0x40,
++		.otg_control = 0x06,
++		.dcd = true,
++	};
++	struct ci_msm_bc12_io io = {
++		.context = &state,
++		.read = bc12_test_read,
++		.write = bc12_test_write,
++		.line_state = bc12_test_line_state,
++		.wait_ms = bc12_test_wait,
++	};
++	enum ci_msm_bc12_type type;
++	int ret;
++
++	ret = ci_msm_bc12_detect(&io, &type);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	KUNIT_EXPECT_EQ(test, type, CI_MSM_BC12_SDP);
++	KUNIT_EXPECT_EQ(test, state.function_control, (u8)0x40);
++	KUNIT_EXPECT_EQ(test, state.otg_control, (u8)0x06);
++
++	state.primary = true;
++	ret = ci_msm_bc12_detect(&io, &type);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	KUNIT_EXPECT_EQ(test, type, CI_MSM_BC12_CDP);
++
++	state.secondary = true;
++	ret = ci_msm_bc12_detect(&io, &type);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	KUNIT_EXPECT_EQ(test, type, CI_MSM_BC12_DCP);
++
++	state.proprietary = true;
++	ret = ci_msm_bc12_detect(&io, &type);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	KUNIT_EXPECT_EQ(test, type, CI_MSM_BC12_PROPRIETARY);
++
++	state.primary = false;
++	ret = ci_msm_bc12_detect(&io, &type);
++	KUNIT_ASSERT_EQ(test, ret, 0);
++	KUNIT_EXPECT_EQ(test, type, CI_MSM_BC12_PROPRIETARY);
++}
++
++static void bc12_test_error_restores_phy(struct kunit *test)
++{
++	struct bc12_test_state state = {
++		.function_control = 0x40,
++		.otg_control = 0x06,
++		.dcd = true,
++		.failed = true,
++	};
++	struct ci_msm_bc12_io io = {
++		.context = &state,
++		.read = bc12_test_read,
++		.write = bc12_test_write,
++		.line_state = bc12_test_line_state,
++		.wait_ms = bc12_test_wait,
++	};
++	enum ci_msm_bc12_type type = CI_MSM_BC12_DCP;
++
++	KUNIT_EXPECT_EQ(test, ci_msm_bc12_detect(&io, &type), -EIO);
++	KUNIT_EXPECT_EQ(test, type, CI_MSM_BC12_UNKNOWN);
++	KUNIT_EXPECT_EQ(test, state.function_control, (u8)0x40);
++	KUNIT_EXPECT_EQ(test, state.otg_control, (u8)0x06);
++}
++
++static void bc12_test_rebind_after_phy_reset(struct kunit *test)
++{
++	struct bc12_test_state state = {
++		.function_control = 0,
++		.otg_control = 0x07,
++		.dcd = true,
++		.primary = true,
++		.secondary = true,
++	};
++	struct ci_msm_bc12_io io = {
++		.context = &state,
++		.read = bc12_test_read,
++		.write = bc12_test_write,
++		.line_state = bc12_test_line_state,
++		.wait_ms = bc12_test_wait,
++	};
++	enum ci_msm_bc12_type type;
++
++	KUNIT_ASSERT_EQ(test, ci_msm_bc12_detect(&io, &type), 0);
++	KUNIT_EXPECT_EQ(test, type, CI_MSM_BC12_DCP);
++	KUNIT_EXPECT_TRUE(test, state.function_control &
++			  ULPI_FUNC_CTRL_SUSPENDM);
++}
++
++static void bc12_test_gadget_stop_keeps_live_source(struct kunit *test)
++{
++	struct ci_msm_bc12_source_state source = {
++		.online = true,
++		.usb_type = POWER_SUPPLY_USB_TYPE_DCP,
++		.current_max = 1200000,
++	};
++
++	KUNIT_EXPECT_FALSE(test, ci_msm_bc12_source_stop(&source, true, true));
++	KUNIT_EXPECT_TRUE(test, source.online);
++	KUNIT_EXPECT_EQ(test, source.usb_type, POWER_SUPPLY_USB_TYPE_DCP);
++	KUNIT_EXPECT_EQ(test, source.current_max, 1200000);
++}
++
++static void bc12_test_sdp_budget_drops_after_unbind(struct kunit *test)
++{
++	struct ci_msm_bc12_source_state source = {
++		.online = true,
++		.usb_type = POWER_SUPPLY_USB_TYPE_SDP,
++		.current_max = 500000,
++	};
++
++	KUNIT_EXPECT_TRUE(test, ci_msm_bc12_source_stop(&source, true, true));
++	KUNIT_EXPECT_TRUE(test, source.online);
++	KUNIT_EXPECT_EQ(test, source.usb_type, POWER_SUPPLY_USB_TYPE_SDP);
++	KUNIT_EXPECT_EQ(test, source.current_max, 100000);
++	KUNIT_EXPECT_FALSE(test, ci_msm_bc12_source_stop(&source, true, true));
++}
++
++static void bc12_test_stop_clears_disconnected_source(struct kunit *test)
++{
++	struct ci_msm_bc12_source_state source = {
++		.online = true,
++		.usb_type = POWER_SUPPLY_USB_TYPE_DCP,
++		.current_max = 1200000,
++	};
++
++	KUNIT_EXPECT_TRUE(test, ci_msm_bc12_source_stop(&source, false, true));
++	KUNIT_EXPECT_FALSE(test, source.online);
++	KUNIT_EXPECT_EQ(test, source.usb_type, POWER_SUPPLY_USB_TYPE_UNKNOWN);
++	KUNIT_EXPECT_EQ(test, source.current_max, 0);
++
++	source.online = true;
++	source.usb_type = POWER_SUPPLY_USB_TYPE_CDP;
++	source.current_max = 1200000;
++	KUNIT_EXPECT_TRUE(test, ci_msm_bc12_source_stop(&source, true, false));
++	KUNIT_EXPECT_FALSE(test, source.online);
++	KUNIT_EXPECT_EQ(test, source.current_max, 0);
++}
++
++static void bc12_test_disconnected_during_detection(struct kunit *test)
++{
++	struct ci_msm_bc12_source_state source = {
++		.online = true,
++		.usb_type = POWER_SUPPLY_USB_TYPE_DCP,
++		.current_max = 1200000,
++	};
++
++	KUNIT_EXPECT_TRUE(test, ci_msm_bc12_source_complete(&source, false,
++						    CI_MSM_BC12_DCP));
++	KUNIT_EXPECT_FALSE(test, source.online);
++	KUNIT_EXPECT_EQ(test, source.usb_type, POWER_SUPPLY_USB_TYPE_UNKNOWN);
++	KUNIT_EXPECT_EQ(test, source.current_max, 0);
++
++	KUNIT_EXPECT_TRUE(test, ci_msm_bc12_source_complete(&source, true,
++						    CI_MSM_BC12_UNKNOWN));
++	KUNIT_EXPECT_TRUE(test, source.online);
++	KUNIT_EXPECT_EQ(test, source.current_max, 100000);
++	KUNIT_EXPECT_TRUE(test, ci_msm_bc12_source_complete(&source, true,
++						    CI_MSM_BC12_DCP));
++	KUNIT_EXPECT_EQ(test, source.usb_type, POWER_SUPPLY_USB_TYPE_DCP);
++	KUNIT_EXPECT_EQ(test, source.current_max, 1200000);
++}
++
++static void bc12_test_unbound_source_detection_needed(struct kunit *test)
++{
++	struct ci_msm_bc12_source_state source = {
++		.online = true,
++		.usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN,
++		.current_max = 100000,
++	};
++
++	KUNIT_EXPECT_TRUE(test,
++		ci_msm_bc12_source_needs_detection(&source, true, true));
++	KUNIT_EXPECT_FALSE(test,
++		ci_msm_bc12_source_needs_detection(&source, false, true));
++	KUNIT_EXPECT_FALSE(test,
++		ci_msm_bc12_source_needs_detection(&source, true, false));
++
++	source.usb_type = POWER_SUPPLY_USB_TYPE_SDP;
++	KUNIT_EXPECT_FALSE(test,
++		ci_msm_bc12_source_needs_detection(&source, true, true));
++	source.usb_type = POWER_SUPPLY_USB_TYPE_DCP;
++	source.current_max = 1200000;
++	KUNIT_EXPECT_FALSE(test,
++		ci_msm_bc12_source_needs_detection(&source, true, true));
++	source.usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
++	KUNIT_EXPECT_FALSE(test,
++		ci_msm_bc12_source_needs_detection(&source, true, true));
++	source.online = false;
++	KUNIT_EXPECT_TRUE(test,
++		ci_msm_bc12_source_needs_detection(&source, true, true));
++}
++
++static struct kunit_case bc12_test_cases[] = {
++	KUNIT_CASE(bc12_test_classification),
++	KUNIT_CASE(bc12_test_error_restores_phy),
++	KUNIT_CASE(bc12_test_rebind_after_phy_reset),
++	KUNIT_CASE(bc12_test_gadget_stop_keeps_live_source),
++	KUNIT_CASE(bc12_test_sdp_budget_drops_after_unbind),
++	KUNIT_CASE(bc12_test_stop_clears_disconnected_source),
++	KUNIT_CASE(bc12_test_disconnected_during_detection),
++	KUNIT_CASE(bc12_test_unbound_source_detection_needed),
++	{}
++};
++
++static struct kunit_suite bc12_test_suite = {
++	.name = "ci-msm-bc12",
++	.test_cases = bc12_test_cases,
++};
++
++kunit_test_suite(bc12_test_suite);
+diff --git a/drivers/usb/chipidea/ci_hdrc_msm_glue.c b/drivers/usb/chipidea/ci_hdrc_msm_glue.c
+new file mode 100644
+index 000000000..1222f2371
+--- /dev/null
++++ b/drivers/usb/chipidea/ci_hdrc_msm_glue.c
+@@ -0,0 +1,672 @@
++// SPDX-License-Identifier: GPL-2.0
++/* Copyright (c) 2010, Code Aurora Forum. All rights reserved. */
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/usb/chipidea.h>
++#include <linux/clk.h>
++#include <linux/reset.h>
++#include <linux/mfd/syscon.h>
++#include <linux/regmap.h>
++#include <linux/io.h>
++#include <linux/reset-controller.h>
++#include <linux/extcon.h>
++#include <linux/of.h>
++#include <linux/delay.h>
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++#include <linux/power_supply.h>
++#include <linux/ulpi/driver.h>
++#endif
++
++#include "ci.h"
++#include "bits.h"
++#include "otg.h"
++#include "otg_fsm.h"
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++#include "ci_hdrc_msm_bc12.h"
++#endif
++
++#define HS_PHY_AHB_MODE			0x0098
++
++#define HS_PHY_GENCONFIG		0x009c
++#define HS_PHY_TXFIFO_IDLE_FORCE_DIS	BIT(4)
++
++#define HS_PHY_GENCONFIG_2		0x00a0
++#define HS_PHY_SESS_VLD_CTRL_EN		BIT(7)
++#define HS_PHY_ULPI_TX_PKT_EN_CLR_FIX	BIT(19)
++
++#define HSPHY_SESS_VLD_CTRL		BIT(25)
++
++/* Vendor base starts at 0x200 beyond CI base */
++#define HS_PHY_CTRL			0x0040
++#define HS_PHY_SEC_CTRL			0x0078
++#define HS_PHY_DIG_CLAMP_N		BIT(16)
++#define HS_PHY_POR_ASSERT		BIT(0)
++
++struct ci_hdrc_msm {
++	struct platform_device *ci;
++	struct clk *core_clk;
++	struct clk *iface_clk;
++	struct clk *fs_clk;
++	struct ci_hdrc_platform_data pdata;
++	struct reset_controller_dev rcdev;
++	bool secondary_phy;
++	bool hsic;
++	bool gadget_phy_on;
++	void __iomem *base;
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++	struct power_supply *source_psy;
++	struct power_supply_desc source_desc;
++	char *source_supplied_to;
++	/* Protect the source properties read from power_supply callbacks. */
++	spinlock_t source_lock;
++	struct ci_msm_bc12_source_state source;
++	struct work_struct source_work;
++	bool source_stopping;
++	unsigned int source_transition_depth;
++#endif
++};
++
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++static enum power_supply_property ci_msm_source_properties[] = {
++	POWER_SUPPLY_PROP_ONLINE,
++	POWER_SUPPLY_PROP_USB_TYPE,
++	POWER_SUPPLY_PROP_CURRENT_MAX,
++};
++
++static int ci_msm_source_get_property(struct power_supply *psy,
++				      enum power_supply_property property,
++				      union power_supply_propval *value)
++{
++	struct ci_hdrc_msm *msm_ci = power_supply_get_drvdata(psy);
++	unsigned long flags;
++
++	spin_lock_irqsave(&msm_ci->source_lock, flags);
++	switch (property) {
++	case POWER_SUPPLY_PROP_ONLINE:
++		value->intval = msm_ci->source.online;
++		break;
++	case POWER_SUPPLY_PROP_USB_TYPE:
++		value->intval = msm_ci->source.usb_type;
++		break;
++	case POWER_SUPPLY_PROP_CURRENT_MAX:
++		value->intval = msm_ci->source.current_max;
++		break;
++	default:
++		spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++		return -EINVAL;
++	}
++	spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++	return 0;
++}
++
++static void ci_msm_source_update(struct ci_hdrc_msm *msm_ci, bool online,
++				 enum ci_msm_bc12_type type)
++{
++	unsigned long flags;
++	bool changed;
++
++	if (!msm_ci->source_psy)
++		return;
++
++	spin_lock_irqsave(&msm_ci->source_lock, flags);
++	changed = ci_msm_bc12_source_complete(&msm_ci->source, online, type);
++	spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++	if (changed)
++		power_supply_changed(msm_ci->source_psy);
++}
++
++static void ci_msm_source_stop(struct ci_hdrc_msm *msm_ci,
++			       bool vbus_active, bool gadget_role)
++{
++	unsigned long flags;
++	bool changed;
++
++	if (!msm_ci->source_psy)
++		return;
++	spin_lock_irqsave(&msm_ci->source_lock, flags);
++	changed = ci_msm_bc12_source_stop(&msm_ci->source, vbus_active,
++					   gadget_role);
++	spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++	if (changed)
++		power_supply_changed(msm_ci->source_psy);
++}
++
++static int ci_msm_source_set_vbus_draw(struct ci_hdrc *ci, unsigned int milliamp)
++{
++	struct ci_hdrc_msm *msm_ci = dev_get_drvdata(ci->dev->parent);
++	unsigned long flags;
++	int current_max;
++
++	if (!msm_ci->source_psy)
++		return -EOPNOTSUPP;
++
++	current_max = min(milliamp, 500U) * 1000;
++	spin_lock_irqsave(&msm_ci->source_lock, flags);
++	if (!msm_ci->source.online ||
++	    msm_ci->source.usb_type != POWER_SUPPLY_USB_TYPE_SDP) {
++		spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++		return 0;
++	}
++	msm_ci->source.current_max = current_max;
++	spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++	power_supply_changed(msm_ci->source_psy);
++	return 0;
++}
++
++static int ci_msm_bc12_ulpi_read(void *context, u8 address)
++{
++	struct ci_hdrc *ci = context;
++
++	return ulpi_read(ci->ulpi, address);
++}
++
++static int ci_msm_bc12_ulpi_write(void *context, u8 address, u8 value)
++{
++	struct ci_hdrc *ci = context;
++
++	return ulpi_write(ci->ulpi, address, value);
++}
++
++static int ci_msm_bc12_line_state(void *context)
++{
++	struct ci_hdrc *ci = context;
++
++	return hw_read(ci, OP_PORTSC, GENMASK(11, 10));
++}
++
++static void ci_msm_bc12_wait(void *context, unsigned int milliseconds)
++{
++	msleep(milliseconds);
++}
++
++static void ci_msm_source_detect(struct ci_hdrc_msm *msm_ci,
++				 struct ci_hdrc *ci)
++{
++	const struct ci_msm_bc12_io io = {
++		.context = ci,
++		.read = ci_msm_bc12_ulpi_read,
++		.write = ci_msm_bc12_ulpi_write,
++		.line_state = ci_msm_bc12_line_state,
++		.wait_ms = ci_msm_bc12_wait,
++	};
++	enum ci_msm_bc12_type type = CI_MSM_BC12_UNKNOWN;
++	int ret;
++
++	if (!msm_ci->source_psy || !ci->ulpi ||
++	    ci->role != CI_ROLE_GADGET || !ci->vbus_active)
++		return;
++
++	ret = ci_msm_bc12_detect(&io, &type);
++	if (ret)
++		dev_warn(ci->dev, "USB source detection failed: %d\n", ret);
++	/* VBUS may have disappeared during the PHY's detection delays. */
++	ci_msm_source_update(msm_ci, ci->vbus_active &&
++			     !!hw_read_otgsc(ci, OTGSC_BSV), type);
++}
++
++static void ci_msm_source_work(struct work_struct *work)
++{
++	struct ci_hdrc_msm *msm_ci = container_of(work, struct ci_hdrc_msm,
++						  source_work);
++	struct platform_device *child = READ_ONCE(msm_ci->ci);
++	struct ci_hdrc *ci = child ? platform_get_drvdata(child) : NULL;
++	unsigned long flags;
++	u32 otg_irq_enable;
++	bool detect, gadget_id, vbus;
++	int ret;
++
++	if (!ci || !ci_otg_is_fsm_mode(ci))
++		return;
++
++	ret = pm_runtime_resume_and_get(ci->dev->parent);
++	if (ret < 0)
++		return;
++
++	/* The OTG state machine shares ci->wq; gadget stop drains this work. */
++	vbus = ci->vbus_active && !!hw_read_otgsc(ci, OTGSC_BSV);
++	gadget_id = !!hw_read_otgsc(ci, OTGSC_ID);
++	spin_lock_irqsave(&msm_ci->source_lock, flags);
++	detect = !msm_ci->source_stopping && !msm_ci->source_transition_depth &&
++		 ci_msm_bc12_source_needs_detection(&msm_ci->source, vbus,
++				    ci->role == CI_ROLE_GADGET && gadget_id);
++	spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++	if (!vbus || !gadget_id || ci->role != CI_ROLE_GADGET) {
++		ci_msm_source_update(msm_ci, false, CI_MSM_BC12_UNKNOWN);
++		goto out;
++	}
++	if (!detect || READ_ONCE(ci->driver) ||
++	    READ_ONCE(ci->gadget_pm_active) ||
++	    !ci->ulpi || !ci->phy)
++		goto out;
++
++	/* Reset and power up the PHY exactly as the bound gadget does. */
++	disable_irq(ci->irq);
++	otg_irq_enable = hw_read_otgsc(ci, OTGSC_INT_EN_BITS);
++	ret = hw_device_reset(ci);
++	if (ret) {
++		dev_warn(ci->dev, "USB source controller reset failed: %d\n",
++			 ret);
++		ci_msm_source_update(msm_ci, true, CI_MSM_BC12_UNKNOWN);
++	}
++	ci->platdata->notify_event(ci, CI_HDRC_CONTROLLER_STOPPED_EVENT);
++	hw_write_otgsc(ci, OTGSC_INT_EN_BITS, otg_irq_enable);
++	ci_otg_fsm_reconcile_inputs(ci);
++	if (!hw_read_otgsc(ci, OTGSC_BSV) ||
++	    !hw_read_otgsc(ci, OTGSC_ID))
++		ci_msm_source_update(msm_ci, false, CI_MSM_BC12_UNKNOWN);
++	enable_irq(ci->irq);
++out:
++	pm_runtime_put(ci->dev->parent);
++}
++
++static void ci_msm_source_queue(struct ci_hdrc_msm *msm_ci,
++				struct ci_hdrc *ci)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&msm_ci->source_lock, flags);
++	if (!msm_ci->source_stopping && !msm_ci->source_transition_depth &&
++	    READ_ONCE(msm_ci->ci) && ci_otg_is_fsm_mode(ci) && ci->wq)
++		queue_work(ci->wq, &msm_ci->source_work);
++	spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++}
++
++static int ci_msm_source_register(struct platform_device *pdev,
++				  struct ci_hdrc_msm *msm_ci,
++				  struct device_node *phy_node)
++{
++	struct power_supply_config config = {
++		.drv_data = msm_ci,
++		.fwnode = dev_fwnode(&pdev->dev),
++	};
++	struct power_supply *psy;
++	const char *name;
++
++	if (!of_device_is_compatible(phy_node, "qcom,usb-hs-phy-apq8064"))
++		return 0;
++
++	spin_lock_init(&msm_ci->source_lock);
++	INIT_WORK(&msm_ci->source_work, ci_msm_source_work);
++	msm_ci->source.usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
++	name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%s-source", dev_name(&pdev->dev));
++	if (!name)
++		return -ENOMEM;
++	msm_ci->source_desc.name = name;
++	msm_ci->source_desc.type = POWER_SUPPLY_TYPE_USB;
++	msm_ci->source_desc.properties = ci_msm_source_properties;
++	msm_ci->source_desc.num_properties = ARRAY_SIZE(ci_msm_source_properties);
++	msm_ci->source_desc.get_property = ci_msm_source_get_property;
++	msm_ci->source_desc.usb_types = BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN) |
++		BIT(POWER_SUPPLY_USB_TYPE_SDP) |
++		BIT(POWER_SUPPLY_USB_TYPE_CDP) |
++		BIT(POWER_SUPPLY_USB_TYPE_DCP);
++
++	if (!device_property_read_string(&pdev->dev, "qcom,bc12-supplied-to",
++					 &name)) {
++		msm_ci->source_supplied_to = devm_kstrdup(&pdev->dev, name,
++							 GFP_KERNEL);
++		if (!msm_ci->source_supplied_to)
++			return -ENOMEM;
++		config.supplied_to = &msm_ci->source_supplied_to;
++		config.num_supplicants = 1;
++	}
++
++	psy = devm_power_supply_register(&pdev->dev, &msm_ci->source_desc,
++					 &config);
++	if (IS_ERR(psy))
++		return PTR_ERR(psy);
++	msm_ci->source_psy = psy;
++	return 0;
++}
++#endif
++
++static int
++ci_hdrc_msm_por_reset(struct reset_controller_dev *r, unsigned long id)
++{
++	struct ci_hdrc_msm *ci_msm = container_of(r, struct ci_hdrc_msm, rcdev);
++	void __iomem *addr = ci_msm->base;
++	u32 val;
++
++	if (id)
++		addr += HS_PHY_SEC_CTRL;
++	else
++		addr += HS_PHY_CTRL;
++
++	val = readl_relaxed(addr);
++	val |= HS_PHY_POR_ASSERT;
++	writel(val, addr);
++	/*
++	 * wait for minimum 10 microseconds as suggested by manual.
++	 * Use a slightly larger value since the exact value didn't
++	 * work 100% of the time.
++	 */
++	udelay(12);
++	val &= ~HS_PHY_POR_ASSERT;
++	writel(val, addr);
++
++	return 0;
++}
++
++static const struct reset_control_ops ci_hdrc_msm_reset_ops = {
++	.reset = ci_hdrc_msm_por_reset,
++};
++
++static int ci_hdrc_msm_notify_event(struct ci_hdrc *ci, unsigned event)
++{
++	struct device *dev = ci->dev->parent;
++	struct ci_hdrc_msm *msm_ci = dev_get_drvdata(dev);
++	int ret;
++
++	switch (event) {
++	case CI_HDRC_CONTROLLER_RESET_EVENT:
++		dev_dbg(dev, "CI_HDRC_CONTROLLER_RESET_EVENT received\n");
++
++		hw_phymode_configure(ci);
++		if (msm_ci->secondary_phy) {
++			u32 val = readl_relaxed(msm_ci->base + HS_PHY_SEC_CTRL);
++			val |= HS_PHY_DIG_CLAMP_N;
++			writel_relaxed(val, msm_ci->base + HS_PHY_SEC_CTRL);
++		}
++
++		ret = phy_init(ci->phy);
++		if (ret)
++			return ret;
++
++		ret = phy_power_on(ci->phy);
++		if (ret) {
++			phy_exit(ci->phy);
++			return ret;
++		}
++		msm_ci->gadget_phy_on = true;
++
++		/* use AHB transactor, allow posted data writes */
++		hw_write_id_reg(ci, HS_PHY_AHB_MODE, 0xffffffff, 0x8);
++
++		/* workaround for rx buffer collision issue */
++		hw_write_id_reg(ci, HS_PHY_GENCONFIG,
++				HS_PHY_TXFIFO_IDLE_FORCE_DIS, 0);
++
++		if (!msm_ci->hsic)
++			hw_write_id_reg(ci, HS_PHY_GENCONFIG_2,
++					HS_PHY_ULPI_TX_PKT_EN_CLR_FIX, 0);
++
++		if (!IS_ERR(ci->platdata->vbus_extcon.edev) || ci->role_switch) {
++			hw_write_id_reg(ci, HS_PHY_GENCONFIG_2,
++					HS_PHY_SESS_VLD_CTRL_EN,
++					HS_PHY_SESS_VLD_CTRL_EN);
++			hw_write(ci, OP_USBCMD, HSPHY_SESS_VLD_CTRL,
++				 HSPHY_SESS_VLD_CTRL);
++
++		}
++		/* USB PHY is now powered; the gadget has not joined the bus yet. */
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++		ci_msm_source_detect(msm_ci, ci);
++#endif
++		break;
++	case CI_HDRC_CONTROLLER_VBUS_EVENT:
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++		ci_msm_source_update(msm_ci, ci->vbus_active,
++				     CI_MSM_BC12_UNKNOWN);
++		if (!ci->driver)
++			ci_msm_source_queue(msm_ci, ci);
++#endif
++		break;
++	case CI_HDRC_CONTROLLER_TRANSITION_START_EVENT:
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++		if (msm_ci->source_psy) {
++			unsigned long flags;
++
++			spin_lock_irqsave(&msm_ci->source_lock, flags);
++			msm_ci->source_transition_depth++;
++			spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++			cancel_work_sync(&msm_ci->source_work);
++		}
++#endif
++		break;
++	case CI_HDRC_CONTROLLER_TRANSITION_END_EVENT:
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++		if (msm_ci->source_psy) {
++			unsigned long flags;
++			bool ready;
++
++			spin_lock_irqsave(&msm_ci->source_lock, flags);
++			if (WARN_ON_ONCE(!msm_ci->source_transition_depth)) {
++				spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++				break;
++			}
++			ready = !--msm_ci->source_transition_depth;
++			spin_unlock_irqrestore(&msm_ci->source_lock, flags);
++			if (!ready)
++				break;
++			if (ci->role != CI_ROLE_GADGET || !ci->vbus_active ||
++			    !hw_read_otgsc(ci, OTGSC_BSV))
++				ci_msm_source_update(msm_ci, false,
++						     CI_MSM_BC12_UNKNOWN);
++			else {
++				ci_msm_source_stop(msm_ci, true, true);
++				ci_msm_source_queue(msm_ci, ci);
++			}
++		}
++#endif
++		break;
++	case CI_HDRC_CONTROLLER_STOPPED_EVENT:
++		dev_dbg(dev, "CI_HDRC_CONTROLLER_STOPPED_EVENT received\n");
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++		ci_msm_source_stop(msm_ci, ci->vbus_active,
++				   ci->role == CI_ROLE_GADGET);
++#endif
++		if (msm_ci->gadget_phy_on) {
++			msm_ci->gadget_phy_on = false;
++			phy_power_off(ci->phy);
++			phy_exit(ci->phy);
++		}
++		break;
++	default:
++		dev_dbg(dev, "unknown ci_hdrc event\n");
++		break;
++	}
++
++	return 0;
++}
++
++static int ci_hdrc_msm_mux_phy(struct ci_hdrc_msm *ci,
++			       struct platform_device *pdev)
++{
++	struct regmap *regmap;
++	struct device *dev = &pdev->dev;
++	struct of_phandle_args args;
++	u32 val;
++	int ret;
++
++	ret = of_parse_phandle_with_fixed_args(dev->of_node, "phy-select", 2, 0,
++					       &args);
++	if (ret)
++		return 0;
++
++	regmap = syscon_node_to_regmap(args.np);
++	of_node_put(args.np);
++	if (IS_ERR(regmap))
++		return PTR_ERR(regmap);
++
++	ret = regmap_write(regmap, args.args[0], args.args[1]);
++	if (ret)
++		return ret;
++
++	ci->secondary_phy = !!args.args[1];
++	if (ci->secondary_phy) {
++		val = readl_relaxed(ci->base + HS_PHY_SEC_CTRL);
++		val |= HS_PHY_DIG_CLAMP_N;
++		writel_relaxed(val, ci->base + HS_PHY_SEC_CTRL);
++	}
++
++	return 0;
++}
++
++static int ci_hdrc_msm_probe(struct platform_device *pdev)
++{
++	struct ci_hdrc_msm *ci;
++	struct platform_device *plat_ci;
++	struct clk *clk;
++	struct reset_control *reset;
++	int ret;
++	struct device_node *ulpi_node, *phy_node;
++
++	dev_dbg(&pdev->dev, "ci_hdrc_msm_probe\n");
++
++	ci = devm_kzalloc(&pdev->dev, sizeof(*ci), GFP_KERNEL);
++	if (!ci)
++		return -ENOMEM;
++	platform_set_drvdata(pdev, ci);
++
++	ci->pdata.name = "ci_hdrc_msm";
++	ci->pdata.capoffset = DEF_CAPOFFSET;
++	ci->pdata.flags	= CI_HDRC_REGS_SHARED | CI_HDRC_DISABLE_STREAMING |
++			  CI_HDRC_OVERRIDE_AHB_BURST |
++			  CI_HDRC_OVERRIDE_PHY_CONTROL;
++	ci->pdata.notify_event = ci_hdrc_msm_notify_event;
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++	ci->pdata.set_vbus_draw = ci_msm_source_set_vbus_draw;
++#endif
++
++	reset = devm_reset_control_get(&pdev->dev, "core");
++	if (IS_ERR(reset))
++		return PTR_ERR(reset);
++
++	ci->core_clk = clk = devm_clk_get(&pdev->dev, "core");
++	if (IS_ERR(clk))
++		return PTR_ERR(clk);
++
++	ci->iface_clk = clk = devm_clk_get(&pdev->dev, "iface");
++	if (IS_ERR(clk))
++		return PTR_ERR(clk);
++
++	ci->fs_clk = clk = devm_clk_get_optional(&pdev->dev, "fs");
++	if (IS_ERR(clk))
++		return PTR_ERR(clk);
++
++	ci->base = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(ci->base))
++		return PTR_ERR(ci->base);
++
++	ci->rcdev.owner = THIS_MODULE;
++	ci->rcdev.ops = &ci_hdrc_msm_reset_ops;
++	ci->rcdev.of_node = pdev->dev.of_node;
++	ci->rcdev.nr_resets = 2;
++	ret = devm_reset_controller_register(&pdev->dev, &ci->rcdev);
++	if (ret)
++		return ret;
++
++	ret = clk_prepare_enable(ci->fs_clk);
++	if (ret)
++		return ret;
++
++	reset_control_assert(reset);
++	usleep_range(10000, 12000);
++	reset_control_deassert(reset);
++
++	clk_disable_unprepare(ci->fs_clk);
++
++	ret = clk_prepare_enable(ci->core_clk);
++	if (ret)
++		return ret;
++
++	ret = clk_prepare_enable(ci->iface_clk);
++	if (ret)
++		goto err_iface;
++
++	ret = ci_hdrc_msm_mux_phy(ci, pdev);
++	if (ret)
++		goto err_mux;
++
++	ulpi_node = of_get_child_by_name(pdev->dev.of_node, "ulpi");
++	if (ulpi_node) {
++		phy_node = of_get_next_available_child(ulpi_node, NULL);
++		ci->hsic = of_device_is_compatible(phy_node, "qcom,usb-hsic-phy");
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++		ret = ci_msm_source_register(pdev, ci, phy_node);
++		if (ret) {
++			of_node_put(phy_node);
++			of_node_put(ulpi_node);
++			goto err_mux;
++		}
++		if (ci->source_psy)
++			ci->pdata.flags |= CI_HDRC_REPORT_VBUS_WITHOUT_GADGET;
++#endif
++		of_node_put(phy_node);
++	}
++	of_node_put(ulpi_node);
++
++	plat_ci = ci_hdrc_add_device(&pdev->dev, pdev->resource,
++				     pdev->num_resources, &ci->pdata);
++	if (IS_ERR(plat_ci)) {
++		ret = PTR_ERR(plat_ci);
++		if (ret != -EPROBE_DEFER)
++			dev_err(&pdev->dev, "ci_hdrc_add_device failed!\n");
++		goto err_mux;
++	}
++
++	pm_runtime_set_active(&pdev->dev);
++	pm_runtime_no_callbacks(&pdev->dev);
++	pm_runtime_enable(&pdev->dev);
++	WRITE_ONCE(ci->ci, plat_ci);
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++	if (ci->source_psy) {
++		struct ci_hdrc *child = platform_get_drvdata(plat_ci);
++
++		if (child)
++			ci_msm_source_queue(ci, child);
++	}
++#endif
++
++	return 0;
++
++err_mux:
++	clk_disable_unprepare(ci->iface_clk);
++err_iface:
++	clk_disable_unprepare(ci->core_clk);
++	return ret;
++}
++
++static void ci_hdrc_msm_remove(struct platform_device *pdev)
++{
++	struct ci_hdrc_msm *ci = platform_get_drvdata(pdev);
++
++#if IS_ENABLED(CONFIG_USB_CHIPIDEA_MSM_BC12)
++	if (ci->source_psy) {
++		unsigned long flags;
++
++		spin_lock_irqsave(&ci->source_lock, flags);
++		ci->source_stopping = true;
++		spin_unlock_irqrestore(&ci->source_lock, flags);
++		cancel_work_sync(&ci->source_work);
++	}
++#endif
++	pm_runtime_disable(&pdev->dev);
++	ci_hdrc_remove_device(ci->ci);
++	clk_disable_unprepare(ci->iface_clk);
++	clk_disable_unprepare(ci->core_clk);
++}
++
++static const struct of_device_id msm_ci_dt_match[] = {
++	{ .compatible = "qcom,ci-hdrc", },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, msm_ci_dt_match);
++
++static struct platform_driver ci_hdrc_msm_driver = {
++	.probe = ci_hdrc_msm_probe,
++	.remove = ci_hdrc_msm_remove,
++	.driver = {
++		.name = "msm_hsusb",
++		.of_match_table = msm_ci_dt_match,
++	},
++};
++
++module_platform_driver(ci_hdrc_msm_driver);
++
++MODULE_ALIAS("platform:msm_hsusb");
++MODULE_ALIAS("platform:ci13xxx_msm");
++MODULE_DESCRIPTION("ChipIdea Highspeed Dual Role Controller");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/usb/chipidea/core.c b/drivers/usb/chipidea/core.c
+index b53672f3e..812645f47 100644
+--- a/drivers/usb/chipidea/core.c
++++ b/drivers/usb/chipidea/core.c
+@@ -1003,12 +1003,20 @@ static ssize_t role_store(struct device *dev,
+ 	}
+ 
+ 	pm_runtime_get_sync(dev);
++	if ((ci->platdata->flags & CI_HDRC_REPORT_VBUS_WITHOUT_GADGET) &&
++	    ci->platdata->notify_event)
++		ci->platdata->notify_event(ci,
++			CI_HDRC_CONTROLLER_TRANSITION_START_EVENT);
+ 	disable_irq(ci->irq);
+ 	ci_role_stop(ci);
+ 	ret = ci_role_start(ci, role);
+ 	if (!ret && ci->role == CI_ROLE_GADGET)
+ 		ci_handle_vbus_change(ci);
+ 	enable_irq(ci->irq);
++	if ((ci->platdata->flags & CI_HDRC_REPORT_VBUS_WITHOUT_GADGET) &&
++	    ci->platdata->notify_event)
++		ci->platdata->notify_event(ci,
++			CI_HDRC_CONTROLLER_TRANSITION_END_EVENT);
+ 	pm_runtime_put_sync(dev);
+ 	mutex_unlock(&ci->mutex);
+ 
+diff --git a/drivers/usb/chipidea/otg.c b/drivers/usb/chipidea/otg.c
+index fecc7d7e2..45338d40e 100644
+--- a/drivers/usb/chipidea/otg.c
++++ b/drivers/usb/chipidea/otg.c
+@@ -216,6 +216,24 @@ static void ci_otg_work(struct work_struct *work)
+ {
+ 	struct ci_hdrc *ci = container_of(work, struct ci_hdrc, work);
+ 
++	if (ci_otg_is_fsm_mode(ci) &&
++	    (ci->platdata->flags & CI_HDRC_REPORT_VBUS_WITHOUT_GADGET) &&
++	    !ci->driver &&
++	    ci->role == CI_ROLE_GADGET && ci->platdata->notify_event) {
++		bool vbus = !!hw_read_otgsc(ci, OTGSC_BSV);
++		unsigned long flags;
++		bool changed;
++
++		spin_lock_irqsave(&ci->lock, flags);
++		changed = ci->vbus_active != vbus;
++		ci->vbus_active = vbus;
++		spin_unlock_irqrestore(&ci->lock, flags);
++
++		if (changed)
++			ci->platdata->notify_event(ci,
++				CI_HDRC_CONTROLLER_VBUS_EVENT);
++	}
++
+ 	if (ci_otg_is_fsm_mode(ci) && !ci_otg_fsm_work(ci)) {
+ 		enable_irq(ci->irq);
+ 		return;
+diff --git a/drivers/usb/chipidea/otg_fsm.c b/drivers/usb/chipidea/otg_fsm.c
+index 929536dc9..2a4c72b2c 100644
+--- a/drivers/usb/chipidea/otg_fsm.c
++++ b/drivers/usb/chipidea/otg_fsm.c
+@@ -788,6 +788,45 @@ irqreturn_t ci_otg_fsm_irq(struct ci_hdrc *ci)
+ 	return retval;
+ }
+ 
++void ci_otg_fsm_reconcile_inputs(struct ci_hdrc *ci)
++{
++	struct otg_fsm *fsm = &ci->fsm;
++	u32 otgsc = hw_read_otgsc(ci, OTGSC_ID | OTGSC_BSV | OTGSC_AVV);
++	bool id = !!(otgsc & OTGSC_ID);
++	bool bsv = !!(otgsc & OTGSC_BSV);
++	bool avv = !!(otgsc & OTGSC_AVV);
++	bool changed = false;
++
++	if (fsm->id != id) {
++		fsm->id = id;
++		changed = true;
++		if (!id) {
++			fsm->a_bus_drop = 0;
++			fsm->a_bus_req = 1;
++			ci->id_event = true;
++		}
++	}
++	if (fsm->b_sess_vld != bsv) {
++		fsm->b_sess_vld = bsv;
++		changed = true;
++		if (bsv) {
++			ci_otg_del_timer(ci, B_SSEND_SRP);
++			ci_otg_del_timer(ci, B_SRP_FAIL);
++			fsm->b_ssend_srp = 0;
++		} else if (id) {
++			ci_otg_add_timer(ci, B_SSEND_SRP);
++		}
++	}
++	if (fsm->a_vbus_vld != avv) {
++		fsm->a_vbus_vld = avv;
++		changed = true;
++		if (!avv)
++			fsm->b_conn = 0;
++	}
++	if (changed)
++		ci_otg_queue_work(ci);
++}
++
+ void ci_hdrc_otg_fsm_start(struct ci_hdrc *ci)
+ {
+ 	ci_otg_queue_work(ci);
+diff --git a/drivers/usb/chipidea/otg_fsm.h b/drivers/usb/chipidea/otg_fsm.h
+index 1f5c5ae0e..93761157e 100644
+--- a/drivers/usb/chipidea/otg_fsm.h
++++ b/drivers/usb/chipidea/otg_fsm.h
+@@ -66,6 +66,7 @@
+ int ci_hdrc_otg_fsm_init(struct ci_hdrc *ci);
+ int ci_otg_fsm_work(struct ci_hdrc *ci);
+ irqreturn_t ci_otg_fsm_irq(struct ci_hdrc *ci);
++void ci_otg_fsm_reconcile_inputs(struct ci_hdrc *ci);
+ void ci_hdrc_otg_fsm_start(struct ci_hdrc *ci);
+ void ci_hdrc_otg_fsm_remove(struct ci_hdrc *ci);
+ 
+@@ -86,6 +87,10 @@ static inline irqreturn_t ci_otg_fsm_irq(struct ci_hdrc *ci)
+ 	return IRQ_NONE;
+ }
+ 
++static inline void ci_otg_fsm_reconcile_inputs(struct ci_hdrc *ci)
++{
++}
++
+ static inline void ci_hdrc_otg_fsm_start(struct ci_hdrc *ci)
+ {
+ 
+diff --git a/drivers/usb/chipidea/udc.c b/drivers/usb/chipidea/udc.c
+index e53172514..de6a383dc 100644
+--- a/drivers/usb/chipidea/udc.c
++++ b/drivers/usb/chipidea/udc.c
+@@ -1864,23 +1864,47 @@ static int ci_udc_get_frame(struct usb_gadget *_gadget)
+ /*
+  * ci_hdrc_gadget_connect: caller makes sure gadget driver is binded
+  */
+-static void ci_hdrc_gadget_connect(struct usb_gadget *_gadget, int is_active)
++static int ci_hdrc_gadget_connect(struct usb_gadget *_gadget, int is_active)
+ {
+ 	struct ci_hdrc *ci = container_of(_gadget, struct ci_hdrc, gadget);
++	int ret;
+ 
+ 	if (is_active) {
+-		pm_runtime_get_sync(ci->dev);
+-		hw_device_reset(ci);
+ 		spin_lock_irq(&ci->lock);
+-		if (ci->driver) {
++		if (ci->gadget_pm_active) {
++			spin_unlock_irq(&ci->lock);
++			return 0;
++		}
++		spin_unlock_irq(&ci->lock);
++
++		if (ci->supports_runtime_pm) {
++			ret = pm_runtime_resume_and_get(ci->dev);
++			if (ret < 0)
++				return ret;
++		}
++		ret = hw_device_reset(ci);
++		if (ret)
++			goto stop_phy;
++		spin_lock_irq(&ci->lock);
++		if (ci->driver && ci->vbus_active) {
+ 			hw_device_state(ci, ci->ep0out->qh.dma);
++			ci->gadget_pm_active = true;
+ 			usb_gadget_set_state(_gadget, USB_STATE_POWERED);
+ 			spin_unlock_irq(&ci->lock);
+ 			usb_udc_vbus_handler(_gadget, true);
+ 		} else {
+ 			spin_unlock_irq(&ci->lock);
++			ret = -ENODEV;
++			goto stop_phy;
+ 		}
+ 	} else {
++		spin_lock_irq(&ci->lock);
++		if (!ci->gadget_pm_active) {
++			spin_unlock_irq(&ci->lock);
++			return 0;
++		}
++		ci->gadget_pm_active = false;
++		spin_unlock_irq(&ci->lock);
+ 		usb_udc_vbus_handler(_gadget, false);
+ 		if (ci->driver)
+ 			ci->driver->disconnect(&ci->gadget);
+@@ -1889,9 +1913,18 @@ static void ci_hdrc_gadget_connect(struct usb_gadget *_gadget, int is_active)
+ 			ci->platdata->notify_event(ci,
+ 			CI_HDRC_CONTROLLER_STOPPED_EVENT);
+ 		_gadget_stop_activity(&ci->gadget);
+-		pm_runtime_put_sync(ci->dev);
++		if (ci->supports_runtime_pm)
++			pm_runtime_put_sync(ci->dev);
+ 		usb_gadget_set_state(_gadget, USB_STATE_NOTATTACHED);
+ 	}
++	return 0;
++
++stop_phy:
++	if (ci->platdata->notify_event)
++		ci->platdata->notify_event(ci, CI_HDRC_CONTROLLER_STOPPED_EVENT);
++	if (ci->supports_runtime_pm)
++		pm_runtime_put_sync(ci->dev);
++	return ret;
+ }
+ 
+ static int ci_udc_vbus_session(struct usb_gadget *_gadget, int is_active)
+@@ -1919,8 +1952,12 @@ static int ci_udc_vbus_session(struct usb_gadget *_gadget, int is_active)
+ 			usb_phy_set_event(ci->usb_phy, USB_EVENT_NONE);
+ 	}
+ 
+-	if (ci->driver)
+-		ci_hdrc_gadget_connect(_gadget, is_active);
++	if (ci->driver) {
++		int connect_ret = ci_hdrc_gadget_connect(_gadget, is_active);
++
++		if (!ret)
++			ret = connect_ret;
++	}
+ 
+ 	return ret;
+ }
+@@ -1956,6 +1993,8 @@ static int ci_udc_vbus_draw(struct usb_gadget *_gadget, unsigned ma)
+ 
+ 	if (ci->usb_phy)
+ 		return usb_phy_set_power(ci->usb_phy, ma);
++	if (ci->platdata->set_vbus_draw)
++		return ci->platdata->set_vbus_draw(ci, ma);
+ 	return -ENOTSUPP;
+ }
+ 
+@@ -2154,10 +2193,17 @@ static int ci_udc_start(struct usb_gadget *gadget,
+ 		return retval;
+ 	}
+ 
+-	if (ci->vbus_active)
+-		ci_hdrc_gadget_connect(gadget, 1);
+-	else
++	if (ci->vbus_active) {
++		retval = ci_hdrc_gadget_connect(gadget, 1);
++		if (retval) {
++			ci->driver = NULL;
++			usb_ep_disable(&ci->ep0in->ep);
++			usb_ep_disable(&ci->ep0out->ep);
++			return retval;
++		}
++	} else {
+ 		usb_udc_vbus_handler(&ci->gadget, false);
++	}
+ 
+ 	return retval;
+ }
+@@ -2186,10 +2232,16 @@ static int ci_udc_stop(struct usb_gadget *gadget)
+ 	struct ci_hdrc *ci = container_of(gadget, struct ci_hdrc, gadget);
+ 	unsigned long flags;
+ 
++	if ((ci->platdata->flags & CI_HDRC_REPORT_VBUS_WITHOUT_GADGET) &&
++	    ci->platdata->notify_event)
++		ci->platdata->notify_event(ci,
++			CI_HDRC_CONTROLLER_TRANSITION_START_EVENT);
++
+ 	spin_lock_irqsave(&ci->lock, flags);
+ 	ci->driver = NULL;
+ 
+-	if (ci->vbus_active) {
++	if (ci->gadget_pm_active) {
++		ci->gadget_pm_active = false;
+ 		hw_device_state(ci, 0);
+ 		spin_unlock_irqrestore(&ci->lock, flags);
+ 		if (ci->platdata->notify_event)
+@@ -2197,12 +2249,17 @@ static int ci_udc_stop(struct usb_gadget *gadget)
+ 			CI_HDRC_CONTROLLER_STOPPED_EVENT);
+ 		_gadget_stop_activity(&ci->gadget);
+ 		spin_lock_irqsave(&ci->lock, flags);
+-		pm_runtime_put(ci->dev);
++		if (ci->supports_runtime_pm)
++			pm_runtime_put(ci->dev);
+ 	}
+ 
+ 	spin_unlock_irqrestore(&ci->lock, flags);
+ 
+ 	ci_udc_stop_for_otg_fsm(ci);
++	if ((ci->platdata->flags & CI_HDRC_REPORT_VBUS_WITHOUT_GADGET) &&
++	    ci->platdata->notify_event)
++		ci->platdata->notify_event(ci,
++			CI_HDRC_CONTROLLER_TRANSITION_END_EVENT);
+ 	return 0;
+ }
+ 
+diff --git a/include/linux/usb/chipidea.h b/include/linux/usb/chipidea.h
+index c6451191d..c938a7e91 100644
+--- a/include/linux/usb/chipidea.h
++++ b/include/linux/usb/chipidea.h
+@@ -67,6 +67,7 @@ struct ci_hdrc_platform_data {
+ #define CI_HDRC_FORCE_VBUS_ACTIVE_ALWAYS	BIT(18)
+ #define	CI_HDRC_HAS_SHORT_PKT_LIMIT	BIT(19)
+ #define	CI_HDRC_OUT_BAND_WAKEUP		BIT(20)
++#define CI_HDRC_REPORT_VBUS_WITHOUT_GADGET	BIT(21)
+ 	enum usb_dr_mode	dr_mode;
+ #define CI_HDRC_CONTROLLER_RESET_EVENT		0
+ #define CI_HDRC_CONTROLLER_STOPPED_EVENT	1
+@@ -74,7 +75,10 @@ struct ci_hdrc_platform_data {
+ #define CI_HDRC_IMX_HSIC_SUSPEND_EVENT		3
+ #define CI_HDRC_CONTROLLER_VBUS_EVENT		4
+ #define CI_HDRC_CONTROLLER_PULLUP_EVENT		5
++#define CI_HDRC_CONTROLLER_TRANSITION_START_EVENT	6
++#define CI_HDRC_CONTROLLER_TRANSITION_END_EVENT	7
+ 	int	(*notify_event) (struct ci_hdrc *ci, unsigned event);
++	int	(*set_vbus_draw)(struct ci_hdrc *ci, unsigned int milliamp);
+ 	struct regulator	*reg_vbus;
+ 	struct usb_otg_caps	ci_otg_caps;
+ 	bool			tpl_support;
+diff --git a/tools/testing/kunit/configs/ci-msm-bc12.config b/tools/testing/kunit/configs/ci-msm-bc12.config
+new file mode 100644
+index 000000000..e74e29ce6
+--- /dev/null
++++ b/tools/testing/kunit/configs/ci-msm-bc12.config
+@@ -0,0 +1,10 @@
++CONFIG_KUNIT=y
++CONFIG_USB=y
++CONFIG_USB_EHCI_HCD=y
++CONFIG_USB_GADGET=y
++CONFIG_POWER_SUPPLY=y
++CONFIG_USB_CHIPIDEA=y
++CONFIG_USB_CHIPIDEA_UDC=y
++CONFIG_USB_CHIPIDEA_MSM=y
++CONFIG_USB_CHIPIDEA_MSM_BC12=y
++CONFIG_USB_CHIPIDEA_MSM_BC12_KUNIT_TEST=y
+diff --git a/tools/testing/kunit/configs/smb347-reset.config b/tools/testing/kunit/configs/smb347-reset.config
+new file mode 100644
+index 000000000..bfa43afc4
+--- /dev/null
++++ b/tools/testing/kunit/configs/smb347-reset.config
+@@ -0,0 +1,6 @@
++CONFIG_KUNIT=y
++CONFIG_I2C=y
++CONFIG_REGULATOR=y
++CONFIG_POWER_SUPPLY=y
++CONFIG_CHARGER_SMB347=y
++CONFIG_CHARGER_SMB347_KUNIT_TEST=y

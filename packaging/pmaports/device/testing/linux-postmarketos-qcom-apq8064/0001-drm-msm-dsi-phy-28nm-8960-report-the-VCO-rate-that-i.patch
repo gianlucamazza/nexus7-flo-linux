@@ -1,0 +1,51 @@
+From 089abfe48435c0983806603a1b6751aff6b0a6f0 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Tue, 10 Nov 2026 00:22:23 +0100
+Subject: [PATCH 1/2] drm/msm/dsi: phy: 28nm-8960: report the VCO rate that is
+ generated
+
+dsi_pll_28nm_clk_set_rate() programs an integer feedback divider, so the
+VCO can only run at multiples of 2 * (27 MHz / 27) = 2 MHz. The
+determine_rate callback only clamped the requested rate, so the clock
+framework assumed the exact requested rate, while recalc_rate later read
+back a rate rounded down to the next 2 MHz step.
+
+On the Nexus 7 (2013) the JDI LT070ME05000 panel requests a byte clock
+of 116.61975 MHz, i.e. a VCO rate of 932.958 MHz, which the PLL
+generates as 932 MHz. Downstream clocks derived from the requested rate
+then no longer match the hardware.
+
+Round the rate in determine_rate the same way set_rate programs it.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ drivers/gpu/drm/msm/dsi/phy/dsi_phy_28nm_8960.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_28nm_8960.c b/drivers/gpu/drm/msm/dsi/phy/dsi_phy_28nm_8960.c
+index 8dcce95..41bf8af 100644
+--- a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_28nm_8960.c
++++ b/drivers/gpu/drm/msm/dsi/phy/dsi_phy_28nm_8960.c
+@@ -235,10 +235,19 @@ static int dsi_pll_28nm_clk_determine_rate(struct clk_hw *hw,
+ 					   struct clk_rate_request *req)
+ {
+ 	struct dsi_pll_28nm *pll_28nm = to_pll_28nm(hw);
++	unsigned long step = 2 * (VCO_REF_CLK_RATE / VCO_PREF_DIV_RATIO);
+ 
+ 	req->rate = clamp_t(unsigned long, req->rate,
+ 			    pll_28nm->phy->cfg->min_pll_rate, pll_28nm->phy->cfg->max_pll_rate);
+ 
++	/*
++	 * The feedback divider programmed by dsi_pll_28nm_clk_set_rate() is
++	 * an integer, so the VCO can only run at multiples of twice the
++	 * pre-divided reference clock. Report the rate that will actually be
++	 * generated, so that consumers derive their rates from it.
++	 */
++	req->rate = rounddown(req->rate, step);
++
+ 	return 0;
+ }
+ 
+-- 
+2.56.0
+

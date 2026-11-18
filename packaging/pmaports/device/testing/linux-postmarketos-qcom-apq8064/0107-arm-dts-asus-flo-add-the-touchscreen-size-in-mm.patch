@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Mon, 16 Nov 2026 16:31:19 +0100
+Subject: [PATCH 2/2] ARM: dts: qcom: apq8064-asus-nexus7-flo: add the
+ touchscreen size in mm
+
+The active area of the 7.02 inch 1200x1920 panel is about 94 x 151 mm
+(323 ppi). Describe it so the touchscreen reports a correct resolution.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index e7ddbd954..d0b57d6ff 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -180,6 +180,8 @@ trackpad@10 {
+ 		compatible = "elan,ektf3624";
+ 		touchscreen-size-x = <2240>;
+ 		touchscreen-size-y = <1344>;
++		touchscreen-x-mm = <94>;
++		touchscreen-y-mm = <151>;
+ 		touchscreen-inverted-x;
+ 		touchscreen-swapped-x-y;
+ 		reg = <0x10>;
+-- 
+2.56.0
+

@@ -1,0 +1,796 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Tue, 17 Nov 2026 12:01:04 +0100
+Subject: [PATCH] mmc: mmci: synchronize DMA abort before unmapping and
+ completion
+
+Stop the peripheral before asynchronous channel termination and use the existing IRQ thread to synchronize before releasing request ownership. Keep submission failures out of mapped PIO fallback, retain failed-stop ownership, and avoid channel release from hard IRQ. Detach IRQs before releasing DMA channels on remove and probe failure. Cover the real DMA boundary and IRQ paths with KUnit.
+---
+ drivers/mmc/host/mmci-test.c     | 277 ++++++++++++++++++++++++++++++-
+ drivers/mmc/host/mmci.c          | 164 ++++++++++++++----
+ drivers/mmc/host/mmci.h          |   8 +-
+ drivers/mmc/host/mmci_qcom_dml.c |   1 +
+ 4 files changed, 407 insertions(+), 43 deletions(-)
+
+diff --git a/drivers/mmc/host/mmci-test.c b/drivers/mmc/host/mmci-test.c
+index e5b78ff73..419e3fa0e 100644
+--- a/drivers/mmc/host/mmci-test.c
++++ b/drivers/mmc/host/mmci-test.c
+@@ -12,7 +12,10 @@ static unsigned long mmci_test_mmio_read(void *priv, unsigned int offset, int si
+ static void mmci_test_mmio_write(void *priv, unsigned int offset, int size,
+ 				 unsigned long value)
+ {
+-	((u32 *)priv)[offset / sizeof(u32)] = value;
++	if (offset == MMCICLEAR)
++		((u32 *)priv)[MMCISTATUS / sizeof(u32)] &= ~value;
++	else
++		((u32 *)priv)[offset / sizeof(u32)] = value;
+ }
+ 
+ static void mmci_test_mmio_unmap(void *priv)
+@@ -73,11 +76,63 @@ struct mmci_test_dma_backend {
+ 	unsigned int terminations;
+ 	int config_error;
+ 	bool prep_error;
++	int terminate_error;
++	int submit_error;
++	unsigned int synchronizations;
++	unsigned int completions;
++	unsigned int issued;
++	unsigned int releases;
++	bool synchronization_atomic;
++	bool termination_saw_enabled;
++	struct mmci_host_ops ops;
++	struct mmc_command command;
++	struct mmc_request request;
+ 	struct mmc_data next;
+ 	struct scatterlist next_sg;
+ 	u8 *buffer;
+ };
+ 
++static dma_cookie_t mmci_test_dma_submit(struct dma_async_tx_descriptor *desc)
++{
++	struct mmci_test_dma_backend *ctx = container_of(desc->chan,
++					struct mmci_test_dma_backend, chan);
++
++	return ctx->submit_error ? ctx->submit_error : 1;
++}
++
++static void mmci_test_dma_issue(struct dma_chan *chan)
++{
++	struct mmci_test_dma_backend *ctx = container_of(chan,
++					struct mmci_test_dma_backend, chan);
++
++	ctx->issued++;
++}
++
++static void mmci_test_dma_synchronize(struct dma_chan *chan)
++{
++	struct mmci_test_dma_backend *ctx = container_of(chan,
++					struct mmci_test_dma_backend, chan);
++
++	ctx->synchronizations++;
++	ctx->synchronization_atomic = irqs_disabled() || in_atomic();
++}
++
++static void mmci_test_request_done(struct mmc_request *request)
++{
++	struct mmci_test_dma_backend *ctx = container_of(request,
++					struct mmci_test_dma_backend, request);
++
++	ctx->completions++;
++}
++
++static void mmci_test_release(struct mmci_host *host)
++{
++	struct mmci_test_dma_backend *ctx = container_of(host->dma_priv,
++					struct mmci_test_dma_backend, dmae);
++
++	ctx->releases++;
++}
++
+ static int mmci_test_dma_config(struct dma_chan *chan,
+ 				struct dma_slave_config *config)
+ {
+@@ -101,6 +156,7 @@ mmci_test_dma_prepare(struct dma_chan *chan, struct scatterlist *sg,
+ 		return NULL;
+ 	ctx->prepared[index] = sg;
+ 	dma_async_tx_descriptor_init(&ctx->desc[index], chan);
++	ctx->desc[index].tx_submit = mmci_test_dma_submit;
+ 	return &ctx->desc[index];
+ }
+ 
+@@ -110,7 +166,9 @@ static int mmci_test_dma_terminate(struct dma_chan *chan)
+ 					struct mmci_test_dma_backend, chan);
+ 
+ 	ctx->terminations++;
+-	return 0;
++	ctx->termination_saw_enabled = readl(ctx->host->base + MMCIDATACTRL) &
++		(MCI_DPSM_ENABLE | MCI_DPSM_DMAENABLE);
++	return ctx->terminate_error;
+ }
+ 
+ static void mmci_test_free_mmc(void *mmc)
+@@ -149,11 +207,16 @@ static struct mmci_test_dma_backend *mmci_test_dma_setup(struct kunit *test)
+ 		return NULL;
+ #endif
+ 	ctx->host->variant = &variant_arm;
+-	ctx->host->ops = &mmci_variant_ops;
++	ctx->ops = mmci_variant_ops;
++	ctx->ops.dma_release = mmci_test_release;
++	ctx->host->ops = &ctx->ops;
++	spin_lock_init(&ctx->host->lock);
+ 	ctx->host->use_dma = true;
+ 	ctx->host->dma_priv = &ctx->dmae;
+ 	ctx->engine.dev = dev;
+ 	ctx->engine.device_config = mmci_test_dma_config;
++	ctx->engine.device_issue_pending = mmci_test_dma_issue;
++	ctx->engine.device_synchronize = mmci_test_dma_synchronize;
+ 	ctx->engine.device_terminate_all = mmci_test_dma_terminate;
+ 	ctx->engine.device_prep_slave_sg = mmci_test_dma_prepare;
+ 	ctx->chan.device = &ctx->engine;
+@@ -202,7 +265,7 @@ static void mmci_sync_transfer_prepares_its_own_scatterlist(struct kunit *test)
+ 	sync.sg = &sg;
+ 	sync.sg_len = 1;
+ 	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, true), 0);
+-	mmci_get_next_data(ctx->host, &sync);
++	mmci_check_data_cookie(ctx->host, &sync);
+ 	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &sync, false), 0);
+ 	KUNIT_EXPECT_EQ(test, ctx->preparations, 1);
+ 	KUNIT_EXPECT_PTR_EQ(test, ctx->prepared[0], &sg);
+@@ -249,7 +312,7 @@ static void mmci_dma_config_failure_returns_mapping_to_cpu(struct kunit *test)
+ 	KUNIT_ASSERT_NOT_NULL(test, ctx);
+ 	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, true), 0);
+ 	ctx->config_error = -EIO;
+-	mmci_get_next_data(ctx->host, &ctx->next);
++	mmci_check_data_cookie(ctx->host, &ctx->next);
+ 	KUNIT_EXPECT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, false), -EIO);
+ 	KUNIT_EXPECT_EQ(test, ctx->next.sg_count, 0);
+ 	KUNIT_EXPECT_EQ(test, ctx->next.host_cookie, 0);
+@@ -263,7 +326,7 @@ static void mmci_dma_prep_failure_returns_mapping_to_cpu(struct kunit *test)
+ 	KUNIT_ASSERT_NOT_NULL(test, ctx);
+ 	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, true), 0);
+ 	ctx->prep_error = true;
+-	mmci_get_next_data(ctx->host, &ctx->next);
++	mmci_check_data_cookie(ctx->host, &ctx->next);
+ 	KUNIT_EXPECT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, false), -ENOMEM);
+ 	KUNIT_EXPECT_EQ(test, ctx->next.sg_count, 0);
+ 	KUNIT_EXPECT_EQ(test, ctx->next.host_cookie, 0);
+@@ -288,13 +351,13 @@ static void mmci_post_previous_request_preserves_started_next(struct kunit *test
+ 	following.sg = &sg;
+ 	following.sg_len = 1;
+ 	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, true), 0);
+-	mmci_get_next_data(ctx->host, &ctx->next);
++	mmci_check_data_cookie(ctx->host, &ctx->next);
+ 	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, false), 0);
+ 	ctx->host->dma_in_progress = true;
+ 	mmci_dmae_finalize(ctx->host, &ctx->next);
+ 	KUNIT_EXPECT_GT(test, ctx->next.sg_count, 0);
+ 	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &following, true), 0);
+-	mmci_get_next_data(ctx->host, &following);
++	mmci_check_data_cookie(ctx->host, &following);
+ 	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &following, false), 0);
+ 	desc = ctx->dmae.desc_current;
+ 	mmci_unprep_data(ctx->host, &ctx->next, 0);
+@@ -305,7 +368,205 @@ static void mmci_post_previous_request_preserves_started_next(struct kunit *test
+ 	mmci_unprep_data(ctx->host, &following, 0);
+ }
+ 
++static void mmci_test_start_transfer(struct kunit *test,
++				     struct mmci_test_dma_backend *ctx)
++{
++	unsigned int datactrl = MCI_DPSM_ENABLE;
++
++	ctx->command.opcode = MMC_READ_SINGLE_BLOCK;
++	ctx->request.cmd = &ctx->command;
++	ctx->request.data = &ctx->next;
++	ctx->request.done = mmci_test_request_done;
++	init_completion(&ctx->request.cmd_completion);
++	ctx->next.mrq = &ctx->request;
++	ctx->host->mrq = &ctx->request;
++	ctx->host->data = &ctx->next;
++	ctx->host->singleirq = true;
++	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, true), 0);
++	mmci_check_data_cookie(ctx->host, &ctx->next);
++	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, false), 0);
++	KUNIT_ASSERT_EQ(test, mmci_dmae_start(ctx->host, &datactrl), 0);
++	ctx->host->datactrl_reg = datactrl;
++	writel(datactrl, ctx->host->base + MMCIDATACTRL);
++	writel(MCI_IRQENABLE | MCI_DATAEND, ctx->host->base + MMCIMASK0);
++	writel(512, ctx->host->base + MMCIDATACNT);
++}
++
++static irqreturn_t mmci_test_interrupt(struct mmci_test_dma_backend *ctx, u32 status)
++{
++	irqreturn_t action;
++
++	writel(status, ctx->host->base + MMCISTATUS);
++	local_irq_disable();
++	action = mmci_irq(0, ctx->host);
++	local_irq_enable();
++	return action;
++}
++
++static void mmci_dma_abort_waits_for_thread_before_unmap_and_completion(struct kunit *test)
++{
++	struct mmci_test_dma_backend *ctx = mmci_test_dma_setup(test);
++	irqreturn_t action;
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	mmci_test_start_transfer(test, ctx);
++	/* A DMA error must stop MMCI before the provider is terminated. */
++	action = mmci_test_interrupt(ctx, MCI_RXOVERRUN);
++	KUNIT_EXPECT_EQ(test, action, IRQ_WAKE_THREAD);
++	KUNIT_EXPECT_FALSE(test, ctx->termination_saw_enabled);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 0);
++	KUNIT_EXPECT_EQ(test, ctx->synchronizations, 0);
++	KUNIT_EXPECT_GT(test, ctx->next.sg_count, 0);
++	if (!ctx->host->mrq)
++		return;
++	writel(0x1234, ctx->host->base + MMCICLOCK);
++	writel(0x5678, ctx->host->base + MMCIPOWER);
++	mmci_irq_thread(0, ctx->host);
++	KUNIT_EXPECT_EQ(test, ctx->synchronizations, 1);
++	KUNIT_EXPECT_FALSE(test, ctx->synchronization_atomic);
++	KUNIT_EXPECT_EQ(test, ctx->next.sg_count, 0);
++	KUNIT_EXPECT_EQ(test, ctx->next.host_cookie, 0);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 1);
++	KUNIT_EXPECT_EQ(test, readl(ctx->host->base + MMCICLOCK), 0x1234);
++	KUNIT_EXPECT_EQ(test, readl(ctx->host->base + MMCIPOWER), 0x5678);
++}
++
++static void mmci_dma_fifo_failure_does_not_release_from_irq(struct kunit *test)
++{
++	struct mmci_test_dma_backend *ctx = mmci_test_dma_setup(test);
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	mmci_test_start_transfer(test, ctx);
++	mmci_test_interrupt(ctx, MCI_DATAEND | MCI_RXDATAAVLBL);
++	KUNIT_EXPECT_EQ(test, ctx->releases, 0);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 0);
++	if (ctx->host->mrq)
++		mmci_irq_thread(0, ctx->host);
++	KUNIT_EXPECT_EQ(test, ctx->releases, 0);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 1);
++	KUNIT_EXPECT_EQ(test, ctx->next.sg_count, 0);
++}
++
++static void mmci_dma_submit_failure_cannot_fall_back_to_mapped_pio(struct kunit *test)
++{
++	struct mmci_test_dma_backend *ctx = mmci_test_dma_setup(test);
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	ctx->request.cmd = &ctx->command;
++	ctx->request.data = &ctx->next;
++	ctx->request.done = mmci_test_request_done;
++	init_completion(&ctx->request.cmd_completion);
++	ctx->next.mrq = &ctx->request;
++	ctx->host->mrq = &ctx->request;
++	ctx->submit_error = -EIO;
++	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, true), 0);
++	mmci_start_data(ctx->host, &ctx->next);
++	KUNIT_EXPECT_EQ(test, ctx->next.error, -EIO);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->host->data, NULL);
++	KUNIT_EXPECT_EQ(test, ctx->issued, 0);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 0);
++	KUNIT_EXPECT_GT(test, ctx->next.sg_count, 0);
++	KUNIT_EXPECT_EQ(test, ctx->host->irq_action, IRQ_WAKE_THREAD);
++	KUNIT_EXPECT_EQ(test, ctx->host->mask1_reg, 0);
++	if (ctx->host->dma_abort_pending)
++		mmci_irq_thread(0, ctx->host);
++	KUNIT_EXPECT_EQ(test, ctx->synchronizations, 1);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 1);
++	KUNIT_EXPECT_EQ(test, ctx->next.sg_count, 0);
++}
++
++static void mmci_write_submit_failure_wakes_cleanup_thread(struct kunit *test)
++{
++	struct mmci_test_dma_backend *ctx = mmci_test_dma_setup(test);
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	ctx->command.opcode = MMC_WRITE_BLOCK;
++	ctx->command.flags = MMC_RSP_R1 | MMC_CMD_ADTC;
++	ctx->command.data = &ctx->next;
++	ctx->next.flags = MMC_DATA_WRITE;
++	ctx->request.cmd = &ctx->command;
++	ctx->request.data = &ctx->next;
++	ctx->request.done = mmci_test_request_done;
++	init_completion(&ctx->request.cmd_completion);
++	ctx->next.mrq = &ctx->request;
++	ctx->host->mrq = &ctx->request;
++	ctx->host->cmd = &ctx->command;
++	ctx->host->singleirq = true;
++	ctx->submit_error = -EIO;
++	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, true), 0);
++	writel(MCI_IRQENABLE, ctx->host->base + MMCIMASK0);
++	KUNIT_EXPECT_EQ(test, mmci_test_interrupt(ctx, MCI_CMDRESPEND), IRQ_WAKE_THREAD);
++	KUNIT_EXPECT_EQ(test, ctx->next.error, -EIO);
++	KUNIT_EXPECT_EQ(test, ctx->issued, 0);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 0);
++	KUNIT_EXPECT_GT(test, ctx->next.sg_count, 0);
++	KUNIT_EXPECT_TRUE(test, ctx->host->irq_thread_pending);
++	if (ctx->host->dma_abort_pending)
++		mmci_irq_thread(0, ctx->host);
++	KUNIT_EXPECT_EQ(test, ctx->synchronizations, 1);
++	KUNIT_EXPECT_FALSE(test, ctx->synchronization_atomic);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 1);
++}
++
++static void mmci_failed_dma_stop_retains_request_and_mapping(struct kunit *test)
++{
++	struct mmci_test_dma_backend *ctx = mmci_test_dma_setup(test);
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	mmci_test_start_transfer(test, ctx);
++	ctx->terminate_error = -EIO;
++	mmci_test_interrupt(ctx, MCI_RXOVERRUN);
++	mmci_irq_thread(0, ctx->host);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 0);
++	KUNIT_EXPECT_EQ(test, ctx->synchronizations, 0);
++	KUNIT_EXPECT_GT(test, ctx->next.sg_count, 0);
++	KUNIT_EXPECT_PTR_EQ(test, ctx->host->mrq, &ctx->request);
++	KUNIT_EXPECT_TRUE(test, ctx->host->irq_thread_pending);
++	KUNIT_EXPECT_EQ(test, readl(ctx->host->base + MMCIMASK0), 0);
++	/* Recover the fake provider, then quiesce before releasing test memory. */
++	ctx->terminate_error = 0;
++	mmci_irq_thread(0, ctx->host);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 1);
++	KUNIT_EXPECT_EQ(test, ctx->next.sg_count, 0);
++}
++
++static void mmci_shared_irq_reentry_cannot_complete_before_dma_sync(struct kunit *test)
++{
++	struct mmci_test_dma_backend *ctx = mmci_test_dma_setup(test);
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	mmci_test_start_transfer(test, ctx);
++	mmci_test_interrupt(ctx, MCI_RXOVERRUN);
++	KUNIT_EXPECT_EQ(test, mmci_test_interrupt(ctx, MCI_DATAEND), IRQ_NONE);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 0);
++	KUNIT_EXPECT_GT(test, ctx->next.sg_count, 0);
++	mmci_irq_thread(0, ctx->host);
++	KUNIT_EXPECT_EQ(test, ctx->completions, 1);
++}
++
++static void mmci_broken_dma_returns_premapped_next_to_cpu(struct kunit *test)
++{
++	struct mmci_test_dma_backend *ctx = mmci_test_dma_setup(test);
++
++	KUNIT_ASSERT_NOT_NULL(test, ctx);
++	KUNIT_ASSERT_EQ(test, mmci_prep_data(ctx->host, &ctx->next, true), 0);
++	ctx->dmae.broken = true;
++	ctx->host->mrq = &ctx->request;
++	mmci_start_data(ctx->host, &ctx->next);
++	KUNIT_EXPECT_EQ(test, ctx->next.sg_count, 0);
++	KUNIT_EXPECT_EQ(test, ctx->next.host_cookie, 0);
++	KUNIT_EXPECT_EQ(test, ctx->issued, 0);
++	KUNIT_EXPECT_NE(test, ctx->host->mask1_reg, 0);
++}
++
+ static struct kunit_case mmci_dma_cases[] = {
++	KUNIT_CASE(mmci_dma_submit_failure_cannot_fall_back_to_mapped_pio),
++	KUNIT_CASE(mmci_write_submit_failure_wakes_cleanup_thread),
++	KUNIT_CASE(mmci_failed_dma_stop_retains_request_and_mapping),
++	KUNIT_CASE(mmci_shared_irq_reentry_cannot_complete_before_dma_sync),
++	KUNIT_CASE(mmci_broken_dma_returns_premapped_next_to_cpu),
++	KUNIT_CASE(mmci_dma_abort_waits_for_thread_before_unmap_and_completion),
++	KUNIT_CASE(mmci_dma_fifo_failure_does_not_release_from_irq),
+ 	KUNIT_CASE(mmci_pre_req_does_not_reconfigure_an_active_channel),
+ 	KUNIT_CASE(mmci_dma_config_failure_returns_mapping_to_cpu),
+ 	KUNIT_CASE(mmci_dma_prep_failure_returns_mapping_to_cpu),
+diff --git a/drivers/mmc/host/mmci.c b/drivers/mmc/host/mmci.c
+index 0e6d38087..9ddb5b8a7 100644
+--- a/drivers/mmc/host/mmci.c
++++ b/drivers/mmc/host/mmci.c
+@@ -524,6 +524,9 @@ static void mmci_set_clkreg(struct mmci_host *host, unsigned int desired)
+ 
+ static void mmci_dma_release(struct mmci_host *host)
+ {
++	if (!host->use_dma)
++		return;
++
+ 	if (host->ops && host->ops->dma_release)
+ 		host->ops->dma_release(host);
+ 
+@@ -591,12 +594,9 @@ static void mmci_unprep_data(struct mmci_host *host, struct mmc_data *data,
+ 	data->host_cookie = 0;
+ }
+ 
+-static void mmci_get_next_data(struct mmci_host *host, struct mmc_data *data)
++static void mmci_check_data_cookie(struct mmci_host *host, struct mmc_data *data)
+ {
+ 	WARN_ON(data->host_cookie && data->host_cookie != host->next_cookie);
+-
+-	if (host->ops && host->ops->get_next_data)
+-		host->ops->get_next_data(host, data);
+ }
+ 
+ static int mmci_dma_start(struct mmci_host *host, unsigned int datactrl)
+@@ -661,6 +661,12 @@ mmci_request_end(struct mmci_host *host, struct mmc_request *mrq)
+ 
+ 	BUG_ON(host->data);
+ 
++	/* The request and its streaming mappings must survive DMA termination. */
++	if (host->dma_abort_pending) {
++		host->irq_action = IRQ_WAKE_THREAD;
++		return;
++	}
++
+ 	host->mrq = NULL;
+ 	host->cmd = NULL;
+ 
+@@ -860,6 +866,8 @@ struct mmci_dmae_priv {
+ 	struct dma_chan	*tx_channel;
+ 	struct dma_async_tx_descriptor	*desc_current;
+ 	struct mmc_data	*data_current;
++	int abort_error;
++	bool broken;
+ };
+ 
+ int mmci_dmae_setup(struct mmci_host *host)
+@@ -946,7 +954,7 @@ void mmci_dmae_release(struct mmci_host *host)
+ 
+ 	if (dmae->rx_channel)
+ 		dma_release_channel(dmae->rx_channel);
+-	if (dmae->tx_channel)
++	if (dmae->tx_channel && dmae->tx_channel != dmae->rx_channel)
+ 		dma_release_channel(dmae->tx_channel);
+ 	dmae->rx_channel = dmae->tx_channel = NULL;
+ }
+@@ -978,14 +986,34 @@ void mmci_dmae_error(struct mmci_host *host)
+ 		return;
+ 
+ 	dev_err(mmc_dev(host->mmc), "error during DMA transfer!\n");
+-	dmaengine_terminate_all(dmae->cur);
++	/* BAM requires its attached engine to stop before the pipe is reset. */
++	mmci_write_datactrlreg(host, 0);
++	readl(host->base + MMCIDATACTRL);
+ 	host->dma_in_progress = false;
++	host->dma_abort_pending = true;
++	dmae->abort_error = dmaengine_terminate_async(dmae->cur);
++}
++
++int mmci_dmae_sync(struct mmci_host *host)
++{
++	struct mmci_dmae_priv *dmae = host->dma_priv;
++
++	if (!host->dma_abort_pending)
++		return 0;
++
++	/* Retry a failed stop; never unmap or complete an unquiesced transfer. */
++	if (dmae->abort_error) {
++		dmae->abort_error = dmaengine_terminate_async(dmae->cur);
++		if (dmae->abort_error)
++			return dmae->abort_error;
++	}
++	dmaengine_synchronize(dmae->cur);
++	mmci_dma_unmap(host, dmae->data_current);
+ 	dmae->cur = NULL;
+ 	dmae->desc_current = NULL;
+ 	dmae->data_current = NULL;
+-	host->data->host_cookie = 0;
+-
+-	mmci_dma_unmap(host, host->data);
++	host->dma_abort_pending = false;
++	return 0;
+ }
+ 
+ void mmci_dmae_finalize(struct mmci_host *host, struct mmc_data *data)
+@@ -1020,12 +1048,14 @@ void mmci_dmae_finalize(struct mmci_host *host, struct mmc_data *data)
+ 	}
+ 
+ 	/*
+-	 * Use of DMA with scatter-gather is impossible.
+-	 * Give up with DMA and switch back to PIO mode.
++	 * Keep channel references alive for all outstanding streaming mappings.
++	 * The existing broken-DMA fallback uses PIO until device removal, where
++	 * channels can safely be released after the IRQs have been detached.
+ 	 */
+ 	if (status & MCI_RXDATAAVLBLMASK) {
+-		dev_err(mmc_dev(host->mmc), "buggy DMA detected. Taking evasive action.\n");
+-		mmci_dma_release(host);
++		dev_err(mmc_dev(host->mmc), "buggy DMA detected; disabling new DMA transfers\n");
++		WRITE_ONCE(dmae->broken, true);
++		return;
+ 	}
+ 
+ 	host->dma_in_progress = false;
+@@ -1064,6 +1094,11 @@ int mmci_dmae_prep_data(struct mmci_host *host, struct mmc_data *data, bool next
+ 
+ 	if (!host->use_dma)
+ 		return -EINVAL;
++	if (READ_ONCE(dmae->broken)) {
++		if (!next)
++			mmci_dma_unmap(host, data);
++		return -EINVAL;
++	}
+ 
+ 	/* If there's no DMA channel, fall back to PIO */
+ 	if (!chan)
+@@ -1128,10 +1163,14 @@ int mmci_dmae_start(struct mmci_host *host, unsigned int *datactrl)
+ 	struct mmci_dmae_priv *dmae = host->dma_priv;
+ 	int ret;
+ 
++	if (host->dma_abort_pending)
++		return -EBUSY;
++
+ 	host->dma_in_progress = true;
+ 	ret = dma_submit_error(dmaengine_submit(dmae->desc_current));
+ 	if (ret < 0) {
+-		host->dma_in_progress = false;
++		/* Even a rejected descriptor needs process-context teardown. */
++		mmci_dmae_error(host);
+ 		return ret;
+ 	}
+ 	dma_async_issue_pending(dmae->cur);
+@@ -1157,6 +1196,7 @@ static struct mmci_host_ops mmci_variant_ops = {
+ 	.dma_start = mmci_dmae_start,
+ 	.dma_finalize = mmci_dmae_finalize,
+ 	.dma_error = mmci_dmae_error,
++	.dma_sync = mmci_dmae_sync,
+ };
+ #else
+ static struct mmci_host_ops mmci_variant_ops = {
+@@ -1210,11 +1250,12 @@ static void mmci_post_request(struct mmc_host *mmc, struct mmc_request *mrq,
+ 	mmci_unprep_data(host, data, err);
+ }
+ 
+-static void mmci_start_data(struct mmci_host *host, struct mmc_data *data)
++static bool mmci_start_data(struct mmci_host *host, struct mmc_data *data)
+ {
+ 	struct variant_data *variant = host->variant;
+ 	unsigned int datactrl, timeout, irqmask;
+ 	unsigned long long clks;
++	int ret;
+ 	void __iomem *base;
+ 
+ 	dev_dbg(mmc_dev(host->mmc), "blksz %04x blks %04x flags %08x\n",
+@@ -1265,8 +1306,15 @@ static void mmci_start_data(struct mmci_host *host, struct mmc_data *data)
+ 	 * Attempt to use DMA operation mode, if this
+ 	 * should fail, fall back to PIO mode
+ 	 */
+-	if (!mmci_dma_start(host, datactrl))
+-		return;
++	ret = mmci_dma_start(host, datactrl);
++	if (!ret)
++		return true;
++	if (host->dma_abort_pending) {
++		data->error = ret;
++		mmci_stop_data(host);
++		mmci_request_end(host, data->mrq);
++		return false;
++	}
+ 
+ 	/* IRQ mode, map the SG list for CPU reading/writing */
+ 	mmci_init_sg(host, data);
+@@ -1292,6 +1340,7 @@ static void mmci_start_data(struct mmci_host *host, struct mmc_data *data)
+ 	mmci_write_datactrlreg(host, datactrl);
+ 	writel(readl(base + MMCIMASK0) & ~MCI_DATAENDMASK, base + MMCIMASK0);
+ 	mmci_set_mask1(host, irqmask);
++	return true;
+ }
+ 
+ static void
+@@ -1487,6 +1536,7 @@ mmci_cmd_irq(struct mmci_host *host, struct mmc_command *cmd,
+ 		 * This will wake up mmci_irq_thread() which will issue
+ 		 * a hardware reset of the MMCI block.
+ 		 */
++		host->busy_reset_pending = true;
+ 		host->irq_action = IRQ_WAKE_THREAD;
+ 	} else {
+ 		cmd->resp[0] = readl(base + MMCIRESPONSE0);
+@@ -1537,6 +1587,13 @@ static char *ux500_state_str(struct mmci_host *host)
+  * busy detect IRQ fails to appear in reasonable time. Only used on
+  * variants with busy detection IRQ delivery.
+  */
++static void mmci_mask_for_irq_thread(struct mmci_host *host)
++{
++	host->irq_mask_saved = readl(host->base + MMCIMASK0);
++	writel(0, host->base + MMCIMASK0);
++	host->irq_thread_pending = true;
++}
++
+ static void ux500_busy_timeout_work(struct work_struct *work)
+ {
+ 	struct mmci_host *host = container_of(work, struct mmci_host,
+@@ -1561,6 +1618,10 @@ static void ux500_busy_timeout_work(struct work_struct *work)
+ 		}
+ 
+ 		mmci_cmd_irq(host, host->cmd, status);
++		if (host->irq_action == IRQ_WAKE_THREAD) {
++			mmci_mask_for_irq_thread(host);
++			irq_wake_thread(host->irq, host);
++		}
+ 	}
+ 
+ 	spin_unlock_irqrestore(&host->lock, flags);
+@@ -1771,6 +1832,10 @@ static irqreturn_t mmci_irq(int irq, void *dev_id)
+ 	u32 status;
+ 
+ 	spin_lock(&host->lock);
++	if (host->irq_thread_pending) {
++		spin_unlock(&host->lock);
++		return IRQ_NONE;
++	}
+ 	host->irq_action = IRQ_HANDLED;
+ 
+ 	do {
+@@ -1816,6 +1881,10 @@ static irqreturn_t mmci_irq(int irq, void *dev_id)
+ 		if (host->variant->busy_detect_flag)
+ 			status &= ~host->variant->busy_detect_flag;
+ 
++		if (host->irq_action == IRQ_WAKE_THREAD) {
++			mmci_mask_for_irq_thread(host);
++			break;
++		}
+ 	} while (status);
+ 
+ 	spin_unlock(&host->lock);
+@@ -1823,34 +1892,46 @@ static irqreturn_t mmci_irq(int irq, void *dev_id)
+ 	return host->irq_action;
+ }
+ 
+-/*
+- * mmci_irq_thread() - A threaded IRQ handler that manages a reset of the HW.
+- *
+- * A reset is needed for some variants, where a datatimeout for a R1B request
+- * causes the DPSM to stay busy (non-functional).
+- */
++/* Synchronize DMA termination and perform variant-specific R1B resets. */
+ static irqreturn_t mmci_irq_thread(int irq, void *dev_id)
+ {
+ 	struct mmci_host *host = dev_id;
+ 	unsigned long flags;
++	bool reset = host->busy_reset_pending;
++	int ret;
+ 
+-	if (host->rst) {
++	/* Completion is held back, and this controller's IRQs are masked. */
++	if (host->dma_abort_pending) {
++		ret = host->ops->dma_sync ? host->ops->dma_sync(host) : -EINVAL;
++		if (ret) {
++			dev_err(mmc_dev(host->mmc),
++				"DMA stop failed (%d); retaining request and mappings\n", ret);
++			return IRQ_HANDLED;
++		}
++	}
++
++	if (reset && host->rst) {
+ 		reset_control_assert(host->rst);
+ 		udelay(2);
+ 		reset_control_deassert(host->rst);
+ 	}
+ 
+ 	spin_lock_irqsave(&host->lock, flags);
+-	writel(host->clk_reg, host->base + MMCICLOCK);
+-	writel(host->pwr_reg, host->base + MMCIPOWER);
+-	writel(MCI_IRQENABLE | host->variant->start_err,
+-	       host->base + MMCIMASK0);
+-
++	if (reset) {
++		writel(host->clk_reg, host->base + MMCICLOCK);
++		writel(host->pwr_reg, host->base + MMCIPOWER);
++		writel(MCI_IRQENABLE | host->variant->start_err,
++		       host->base + MMCIMASK0);
++	} else {
++		writel(host->irq_mask_saved, host->base + MMCIMASK0);
++	}
++	host->busy_reset_pending = false;
++	host->irq_thread_pending = false;
+ 	host->irq_action = IRQ_HANDLED;
+ 	mmci_request_end(host, host->mrq);
+ 	spin_unlock_irqrestore(&host->lock, flags);
+ 
+-	return host->irq_action;
++	return IRQ_HANDLED;
+ }
+ 
+ static void mmci_request(struct mmc_host *mmc, struct mmc_request *mrq)
+@@ -1871,11 +1952,16 @@ static void mmci_request(struct mmc_host *mmc, struct mmc_request *mrq)
+ 	host->mrq = mrq;
+ 
+ 	if (mrq->data)
+-		mmci_get_next_data(host, mrq->data);
++		mmci_check_data_cookie(host, mrq->data);
+ 
+ 	if (mrq->data &&
+-	    (host->variant->datactrl_first || mrq->data->flags & MMC_DATA_READ))
+-		mmci_start_data(host, mrq->data);
++	    (host->variant->datactrl_first || mrq->data->flags & MMC_DATA_READ) &&
++	    !mmci_start_data(host, mrq->data)) {
++		mmci_mask_for_irq_thread(host);
++		spin_unlock_irqrestore(&host->lock, flags);
++		irq_wake_thread(host->irq, host);
++		return;
++	}
+ 
+ 	if (mrq->sbc)
+ 		mmci_start_command(host, mrq->sbc, 0);
+@@ -2429,6 +2515,7 @@ static int mmci_probe(struct amba_device *dev,
+ 			goto clk_disable;
+ 	}
+ 
++	host->irq = dev->irq[0];
+ 	ret = devm_request_threaded_irq(&dev->dev, dev->irq[0], mmci_irq,
+ 					mmci_irq_thread, IRQF_SHARED,
+ 					DRIVER_NAME " (cmd)", host);
+@@ -2463,8 +2550,14 @@ static int mmci_probe(struct amba_device *dev,
+ 	pm_runtime_use_autosuspend(&dev->dev);
+ 
+ 	ret = mmc_add_host(mmc);
+-	if (ret)
++	if (ret) {
++		writel(0, host->base + MMCIMASK0);
++		devm_free_irq(&dev->dev, dev->irq[0], host);
++		if (dev->irq[1])
++			devm_free_irq(&dev->dev, dev->irq[1], host);
++		mmci_dma_release(host);
+ 		goto clk_disable;
++	}
+ 
+ 	pm_runtime_put(&dev->dev);
+ 	return 0;
+@@ -2498,6 +2591,9 @@ static void mmci_remove(struct amba_device *dev)
+ 		writel(0, host->base + MMCICOMMAND);
+ 		writel(0, host->base + MMCIDATACTRL);
+ 
++		devm_free_irq(&dev->dev, dev->irq[0], host);
++		if (dev->irq[1])
++			devm_free_irq(&dev->dev, dev->irq[1], host);
+ 		mmci_dma_release(host);
+ 		clk_disable_unprepare(host->clk);
+ 	}
+diff --git a/drivers/mmc/host/mmci.h b/drivers/mmc/host/mmci.h
+index 29bfc00c7..487409035 100644
+--- a/drivers/mmc/host/mmci.h
++++ b/drivers/mmc/host/mmci.h
+@@ -394,12 +394,12 @@ struct mmci_host_ops {
+ 	void (*unprep_data)(struct mmci_host *host, struct mmc_data *data,
+ 			    int err);
+ 	u32 (*get_datactrl_cfg)(struct mmci_host *host);
+-	void (*get_next_data)(struct mmci_host *host, struct mmc_data *data);
+ 	int (*dma_setup)(struct mmci_host *host);
+ 	void (*dma_release)(struct mmci_host *host);
+ 	int (*dma_start)(struct mmci_host *host, unsigned int *datactrl);
+ 	void (*dma_finalize)(struct mmci_host *host, struct mmc_data *data);
+ 	void (*dma_error)(struct mmci_host *host);
++	int (*dma_sync)(struct mmci_host *host);
+ 	void (*set_clkreg)(struct mmci_host *host, unsigned int desired);
+ 	void (*set_pwrreg)(struct mmci_host *host, unsigned int pwr);
+ 	bool (*busy_complete)(struct mmci_host *host, struct mmc_command *cmd, u32 status, u32 err_msk);
+@@ -449,7 +449,12 @@ struct mmci_host {
+ 
+ 	struct timer_list	timer;
+ 	unsigned int		oldstat;
++	int			irq;
+ 	u32			irq_action;
++	u32			irq_mask_saved;
++	bool			irq_thread_pending;
++	bool			busy_reset_pending;
++	bool			dma_abort_pending;
+ 
+ 	/* pio stuff */
+ 	struct sg_mapping_iter	sg_miter;
+@@ -484,6 +489,7 @@ void mmci_dmae_release(struct mmci_host *host);
+ int mmci_dmae_start(struct mmci_host *host, unsigned int *datactrl);
+ void mmci_dmae_finalize(struct mmci_host *host, struct mmc_data *data);
+ void mmci_dmae_error(struct mmci_host *host);
++int mmci_dmae_sync(struct mmci_host *host);
+ #endif
+ 
+ #ifdef CONFIG_MMC_QCOM_DML
+diff --git a/drivers/mmc/host/mmci_qcom_dml.c b/drivers/mmc/host/mmci_qcom_dml.c
+index 29293634c..d098bc142 100644
+--- a/drivers/mmc/host/mmci_qcom_dml.c
++++ b/drivers/mmc/host/mmci_qcom_dml.c
+@@ -194,6 +194,7 @@ static struct mmci_host_ops qcom_variant_ops = {
+ 	.dma_start = qcom_dma_start,
+ 	.dma_finalize = mmci_dmae_finalize,
+ 	.dma_error = mmci_dmae_error,
++	.dma_sync = mmci_dmae_sync,
+ };
+ 
+ void qcom_variant_init(struct mmci_host *host)
+-- 
+2.56.0
+

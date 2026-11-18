@@ -1,0 +1,15 @@
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -152,7 +152,11 @@
+ 	status = "okay";
+ 
+ 	trackpad@10 {
+-		compatible = "elan,ekth3500";
++		compatible = "elan,ektf3624";
++		touchscreen-size-x = <2240>;
++		touchscreen-size-y = <1344>;
++		touchscreen-inverted-x;
++		touchscreen-swapped-x-y;
+ 		reg = <0x10>;
+ 		interrupt-parent = <&tlmm_pinmux>;
+ 		interrupts = <6 IRQ_TYPE_EDGE_FALLING>;

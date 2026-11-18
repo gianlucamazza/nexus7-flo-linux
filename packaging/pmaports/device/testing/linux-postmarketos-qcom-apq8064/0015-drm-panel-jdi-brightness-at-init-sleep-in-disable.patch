@@ -1,0 +1,56 @@
+Subject: [PATCH] drm/panel: jdi-lt070me05000: restore brightness at init, sleep in before the stream stops
+
+The DCS soft reset in the init sequence resets the brightness register,
+and the only write that restores it is the HS one sent from
+backlight_enable() while the video stream starts. On the Nexus 7 (2013)
+with the MSM DSI v2 host that write is lost and the panel stays at full
+brightness until userspace writes the value again. Program the
+brightness in the init sequence.
+
+SET_DISPLAY_OFF and ENTER_SLEEP_MODE were sent from unprepare, after the
+host stopped the video stream, where the MSM DSI host times out waiting
+for video done (-110). Send them from disable instead.
+
+--- a/drivers/gpu/drm/panel/panel-jdi-lt070me05000.c	2026-11-15 19:37:56.117632473 +0100
++++ b/drivers/gpu/drm/panel/panel-jdi-lt070me05000.c	2026-11-15 19:37:56.210539827 +0100
+@@ -67,6 +67,17 @@
+ 	 */
+ 	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, MIPI_DCS_WRITE_CONTROL_DISPLAY, 0x24);
+ 
++	/*
++	 * The soft reset above puts the brightness register back to its
++	 * default. Program the requested level here, in LP mode with the rest
++	 * of the init sequence, instead of relying on the HS write that
++	 * backlight_enable() sends while the video stream is starting. The
++	 * backlight is still marked off here, so use the stored level.
++	 */
++	if (jdi->backlight)
++		mipi_dsi_dcs_set_display_brightness_multi(&dsi_ctx,
++				jdi->backlight->props.brightness);
++
+ 	/* CABC off */
+ 	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, MIPI_DCS_WRITE_POWER_SAVE, 0x00);
+ 
+@@ -118,6 +128,13 @@
+ 
+ 	backlight_disable(jdi->backlight);
+ 
++	/*
++	 * Send display off and sleep in while the host still runs the video
++	 * stream. Once the stream is stopped the DSI command engine waits for
++	 * a video-done interrupt that never comes and both commands time out.
++	 */
++	jdi_panel_off(jdi);
++
+ 	return 0;
+ }
+ 
+@@ -127,8 +144,6 @@
+ 	struct device *dev = &jdi->dsi->dev;
+ 	int ret;
+ 
+-	jdi_panel_off(jdi);
+-
+ 	ret = regulator_bulk_disable(ARRAY_SIZE(jdi->supplies), jdi->supplies);
+ 	if (ret < 0)
+ 		dev_err(dev, "regulator disable failed, %d\n", ret);

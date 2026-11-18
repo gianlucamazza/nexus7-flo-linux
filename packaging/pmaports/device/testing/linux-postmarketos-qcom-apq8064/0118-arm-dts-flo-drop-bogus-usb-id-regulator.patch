@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Tue, 17 Nov 2026 21:02:59 +0100
+Subject: [PATCH] ARM: dts: qcom: flo: stop driving USB ID GPIO as regulator
+
+---
+ .../boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts    | 11 -----------
+ 1 file changed, 11 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index d0b57d6ff..f583bcedb 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -36,17 +36,6 @@ ramoops@88d00000 {
+ 		};
+ 	};
+ 
+-	ext_3p3v: regulator-ext-3p3v {
+-		compatible = "regulator-fixed";
+-		regulator-min-microvolt = <3300000>;
+-		regulator-max-microvolt = <3300000>;
+-		regulator-name = "ext_3p3v";
+-		startup-delay-us = <0>;
+-		gpio = <&tlmm_pinmux 77 GPIO_ACTIVE_HIGH>;
+-		enable-active-high;
+-		regulator-boot-on;
+-	};
+-
+ 	gpio-keys {
+ 		compatible = "gpio-keys";
+ 		pinctrl-names = "default";

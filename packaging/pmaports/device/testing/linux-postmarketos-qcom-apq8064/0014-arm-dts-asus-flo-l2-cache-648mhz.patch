@@ -1,0 +1,49 @@
+Subject: [PATCH] ARM: dts: qcom: asus-flo: run the L2 cache at 648 MHz (experimental)
+
+krait-cc leaves the L2 cache clock at the 384 MHz aux rate. Assign
+648 MHz, the vendor rate for CPU frequencies up to 1026 MHz, and keep the
+digital (S3) and memory (L24) rails at the 1.05 V that rate needs.
+Not validated: the vendor kernel pairs CPU rates above 1026 MHz with
+1134 MHz.
+
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -261,9 +261,11 @@
+ 			regulator-max-microvolt = <2900000>;
+ 		};
+ 
++		/* Also the L2 cache memory rail: keep it at the 648 MHz level. */
+ 		pm8921_l24: l24 {
+-			regulator-min-microvolt = <750000>;
++			regulator-min-microvolt = <1050000>;
+ 			regulator-max-microvolt = <1150000>;
++			regulator-always-on;
+ 		};
+ 
+ 		pm8921_lvs2: lvs2 {
+@@ -271,9 +273,10 @@
+ 
+ 		/* msm otg HSUSB_VDDCX */
+ 		pm8921_s3: s3 {
+-			regulator-min-microvolt = <500000>;
++			regulator-min-microvolt = <1050000>;
+ 			regulator-max-microvolt = <1150000>;
+ 			qcom,switch-mode-frequency = <4800000>;
++			regulator-always-on;
+ 		};
+ 
+ 		/*
+@@ -450,3 +453,13 @@
+ &cpu_alert3 {
+ 	temperature = <85000>;
+ };
++
++/*
++ * The vendor kernel runs the L2 cache at 648 MHz for CPU rates up to
++ * 1026 MHz and at 1134 MHz above that. Nothing scales it here, so pick the
++ * rate that the 1.05 V digital and memory rails allow.
++ */
++&kraitcc {
++	assigned-clocks = <&kraitcc 4>;
++	assigned-clock-rates = <648000000>;
++};
