@@ -105,3 +105,8 @@ application under GTK's other supported renderer as a diagnostic A/B with
 stderr captured for both runs, then
 fix the failing GL context path or report a minimal GTK null-context bug with
 the symbolized stack. A renderer switch alone would not close this issue.
+For that reproduction, set `EGL_LOG_LEVEL=debug` only in the test process:
+[Mesa documents this variable](https://docs.mesa3d.org/egl.html#environment-variables)
+as controlling EGL and driver logging. Capture its stderr alongside GTK's
+diagnostics, so the first failed EGL operation can be correlated with the
+null-context stack. This is instrumentation, not a persistent renderer setting.
