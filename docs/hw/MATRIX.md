@@ -145,10 +145,15 @@ driver work, **(d)** not feasible in mainline today.
 `wcn36xx_smd_start_scan()` (`smd.c`) prints the status byte returned by the
 firmware for a START_SCAN request; it is called from `wcn36xx_config()` on each
 channel change during a software scan and its return value is ignored
-(`main.c`, software-scan branch). So the firmware is refusing individual
-channels while the scan as a whole continues, which matches "scan returns
-results". Which channels (and why) is not visible in the source; enabling
-`WCN36XX_DBG_HAL` would log the channel number before each failure.
+(`main.c`, software-scan branch). On flo, tracing the scan caller identified
+`wpa_supplicant`; HAL channel logging associated every observed `err=5`
+(`MEM_FAIL`) with channel 144. An explicit scan of 144 reproduced it, whereas
+140 did not. The kernel branch `flo/wcn36xx-scan-status` propagates individual
+firmware failures to mac80211 (`97367b28b`) and uses the standard
+`ieee80211-freq-limit` property in the flo device tree to exclude 144 from
+this board's advertised channels (`81ecf7950`). The driver allocates band
+and channel data per device before applying the limit. ARM object and DTB
+builds pass; the change still needs a native boot and scan regression test.
 
 ### 5. Regulators the vendor keeps always on
 
