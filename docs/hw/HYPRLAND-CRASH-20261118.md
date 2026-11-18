@@ -78,7 +78,9 @@ the package's `/usr/bin/Hyprland` SHA-256 is
 `a6336feff09c8767fc1d05edadd3dfbeb38f078b4b25bdef0306e73560f26ee6`,
 identical to the running tablet's installed binary at the time of this
 check. Keep the diagnostic SSH path until explicitly instructed to remove
-it. The rollback APK has not been installed or copied to the tablet yet.
+it. The rollback APK was copied to
+`/var/tmp/hyprland-0.54.3-r0-rollback.apk` on the tablet; its SHA-256
+there matches the host copy. It has not been installed.
 
 The core was copied temporarily to a private host directory for analysis
 and deleted. This document contains no core memory or private firmware.
