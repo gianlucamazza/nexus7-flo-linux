@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarise a nexus7-perfprobe capture.
 
-usage: perf-analyze.py capture.txt [--top N]
+usage: perf-analyze.py capture.txt [--top N] [--marks phases.marks]
 
 Prints, for the whole capture and for the samples with touch activity:
 frames per second (display interrupt rate), GPU interrupt rate, total CPU
@@ -65,8 +65,19 @@ def main():
         i = args.index("--top")
         top = int(args[i + 1])
         del args[i:i + 2]
+    marks = None
+    if "--marks" in args:
+        i = args.index("--marks")
+        marks = args[i + 1]
+        del args[i:i + 2]
     s = parse(args[0])
     pairs = list(zip(s, s[1:]))
+    if marks:
+        # one summary per phase written by nexus7-uibench ("name uptime" lines)
+        m = [(l.split()[0], float(l.split()[1])) for l in open(marks) if l.strip()]
+        for (name, start), (_, stop) in zip(m, m[1:]):
+            summary([(a, b) for a, b in pairs if a["up"] >= start and b["up"] <= stop], name, top)
+        return
     summary(pairs, "all", top)
     active = [(a, b) for a, b in pairs if int(b.get("touch", 0)) - int(a.get("touch", 0)) > 3]
     summary(active, "touching", top)

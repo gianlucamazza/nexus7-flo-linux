@@ -1,0 +1,40 @@
+#!/bin/sh
+# Collect everything needed to analyse the tablet into one archive (runs on the tablet).
+#   nexus7-diag-collect [output.tar.gz]
+# Contents: kernel and boot info, dmesg, journal of this and the previous boot
+# (errors and full), pstore and devcoredump files, thermal/cpufreq/regulator
+# state, charger registers, GPU and display state, interrupts, memory, services,
+# packages, and the soak/perf logs in /var/tmp.
+set -u
+ts=$(date +%Y%m%d-%H%M%S)
+out=${1:-/var/tmp/nexus7-diag-$ts.tar.gz}
+d=$(mktemp -d /var/tmp/nexus7-diag.XXXXXX)
+run() { f=$1; shift; { echo "# $*"; "$@"; } > "$d/$f" 2>&1; }
+
+run system.txt sh -c 'uname -a; cat /proc/cmdline; uptime; apk info -v 2>/dev/null | grep -E "^(linux-postmarketos|mesa-|phosh-|phoc-|quickshell|hyprland|flo-)"'
+run dmesg.txt dmesg
+run journal-errors.txt journalctl -b -p 4 --no-pager -q
+run journal-full.txt journalctl -b --no-pager -q -o short-monotonic
+run journal-prev-tail.txt journalctl -b -1 --no-pager -q -o short-monotonic -n 300
+run boots.txt journalctl --list-boots --no-pager
+run thermal.txt sh -c 'for z in /sys/class/thermal/thermal_zone*; do echo "$(cat $z/type) $(cat $z/temp) trip0=$(cat $z/trip_point_0_temp 2>/dev/null) mode=$(cat $z/mode 2>/dev/null)"; done'
+run cpufreq.txt sh -c 'for p in /sys/devices/system/cpu/cpufreq/policy*; do echo "$p $(cat $p/scaling_governor) cur=$(cat $p/scaling_cur_freq) min=$(cat $p/scaling_min_freq) max=$(cat $p/scaling_max_freq)"; cat $p/stats/time_in_state 2>/dev/null | tr "\n" " "; echo; done'
+run regulators.txt cat /sys/kernel/debug/regulator/regulator_summary
+run clocks.txt sh -c 'grep -E "krait|l2|gfx3d|mdp|dsi|smmu" /sys/kernel/debug/clk/clk_summary'
+run power.txt sh -c 'for f in /sys/class/power_supply/*; do echo "== $f"; cat $f/uevent; done; for r in 01 02 04 06 30 3d 3e 3f; do printf "smb345 0x%s=" $r; i2cget -f -y 0 0x6a 0x$r 2>&1; done'
+run gpu.txt sh -c 'cat /sys/kernel/debug/dri/*/gpu 2>/dev/null | head -60; for f in /sys/class/devfreq/*; do echo "$f $(cat $f/governor) $(cat $f/cur_freq)"; cat $f/trans_stat; done'
+run display.txt sh -c 'for c in /sys/class/drm/card*-*; do echo "$c $(cat $c/status) $(cat $c/dpms 2>/dev/null) $(cat $c/modes 2>/dev/null | tr "\n" " ")"; done; cat /sys/class/backlight/*/brightness /sys/class/backlight/*/actual_brightness; cat /sys/kernel/debug/dri/*/state 2>/dev/null | head -80'
+run input.txt sh -c 'cat /proc/bus/input/devices; libinput list-devices 2>/dev/null'
+run interrupts.txt cat /proc/interrupts
+run memory.txt sh -c 'free -m; cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io; zramctl 2>/dev/null'
+run processes.txt top -bn1
+run services.txt sh -c 'systemctl --failed --no-legend; systemctl list-units --type=service --state=running --no-legend --plain; systemctl is-active flo-sessiond greetd'
+run sessiond.txt sh -c 'floctl status 2>&1; grep -v "^#" /etc/flo-sessiond.conf | grep .'
+run config.txt sh -c 'cat /etc/kernel-cmdline.d/*.conf /etc/environment.d/*.conf; grep -h . /etc/systemd/journald.conf.d/*.conf 2>/dev/null'
+mkdir -p "$d/pstore" "$d/devcoredump" "$d/logs"
+cp -a /var/lib/systemd/pstore/. "$d/pstore/" 2>/dev/null
+cp -a /var/lib/nexus7-devcoredump/. "$d/devcoredump/" 2>/dev/null
+cp -a /var/tmp/soak-*.log /var/tmp/uibench "$d/logs/" 2>/dev/null
+tar -C "$d" -czf "$out" .
+rm -rf "${d:?}"
+echo "$out"

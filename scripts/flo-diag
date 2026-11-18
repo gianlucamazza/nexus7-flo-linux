@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Collect a diagnostic archive on the tablet and unpack it on the laptop.
+#   FLO_HOST=root@tablet FLO_DIAG_DIR=/private/recovery scripts/flo-diag
+set -euo pipefail
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+PRIV=${FLO_DIAG_DIR:?Set FLO_DIAG_DIR to the private recovery directory}
+SSH=(ssh -i "$PRIV/diagnostic-key" -o UserKnownHostsFile="$PRIV/known_hosts" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=10)
+HOST=${FLO_HOST:?Set FLO_HOST to the tablet SSH target}
+scp -q "${SSH[@]:1}" "$ROOT/scripts/nexus7-diag-collect" "$HOST:/usr/local/sbin/"
+remote=$("${SSH[@]}" "$HOST" nexus7-diag-collect | tail -1)
+dest="$PRIV/diag/$(basename "$remote" .tar.gz)"
+mkdir -p "$dest"
+scp -q "${SSH[@]:1}" "$HOST:$remote" "$dest.tar.gz"
+tar -C "$dest" -xzf "$dest.tar.gz"
+"${SSH[@]}" "$HOST" "rm -f '$remote'"
+echo "$dest"
+ls "$dest"
+grep -v "Kernel command line" "$dest/dmesg.txt" | grep -cE "cmd dma tx failed|hangcheck|lockup|Oops|BUG|gpu fault" | sed 's/^/kernel error lines: /' || true
