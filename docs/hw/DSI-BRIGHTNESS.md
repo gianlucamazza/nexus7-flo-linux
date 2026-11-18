@@ -1,5 +1,18 @@
 # Flo brightness regression: shell permissions and panel protocol
 
+## Panel operating mode: source correction (2026-11-18)
+
+The original [JDI panel submission](https://lkml.iu.edu/hypermail/linux/kernel/1606.3/02884.html)
+identifies LT070ME05000 in the Nexus 7 2013 as a **video mode** panel. It
+cites vendor `dsi-panel-jdi-dualmipi1-video.dtsi`, labels the JDI interface
+command as video mode, and removes tear-on/scanline commands because they are
+for command mode. The current flo DT binds `jdi,lt070me05000`; its panel
+driver sets `MIPI_DSI_MODE_VIDEO`. Earlier project notes claiming that the
+Android driver used command mode were unsupported. A command mode conversion
+is therefore not a justified next fix for the brightness artifact. The
+remaining investigation concerns command insertion into the active video
+stream, its timing, and DSI/MDP/PHY state.
+
 ## Confirmed shell fault
 
 On r23 with flo-shell r8, the UI selected brightnessctl because the executable
