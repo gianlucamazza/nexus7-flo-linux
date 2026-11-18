@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -17,6 +18,9 @@ import time
 
 TRACEFS = Path("/sys/kernel/tracing")
 FUNCTIONS = (
+    "dsi_dcs_bl_update_status",
+    "mipi_dsi_dcs_write",
+    "dsi_host_transfer",
     "mdp4_crtc_vblank_irq",
     "dsi_host_irq",
     "msm_dsi_manager_wait_for_vblank",
@@ -78,7 +82,7 @@ def capture(out, seconds, root=TRACEFS):
     instance = root / "instances" / f"nexus7_dsi_{os.getpid()}"
     if instance.exists():
         raise RuntimeError("trace instance already exists: " + str(instance))
-    started = time.time()
+    setup_started = time.time()
     try:
         instance.mkdir()
         write(instance / "tracing_on", "0")
@@ -92,10 +96,15 @@ def capture(out, seconds, root=TRACEFS):
             write(instance / "events" / event / "enable", "1")
         write(instance / "trace", "")
         write(instance / "tracing_on", "1")
+        started = time.time()
+        started_mono = time.monotonic()
         write(instance / "trace_marker", "nexus7-dsi-start")
+        (out / "ready").write_text("tracing\n")
         time.sleep(seconds)
         write(instance / "trace_marker", "nexus7-dsi-stop")
         write(instance / "tracing_on", "0")
+        ended = time.time()
+        ended_mono = time.monotonic()
         (out / "trace.txt").write_text((instance / "trace").read_text())
     finally:
         if instance.exists():
@@ -105,21 +114,30 @@ def capture(out, seconds, root=TRACEFS):
                 write(instance / "events" / event / "enable", "0")
             instance.rmdir()
 
-    ended = time.time()
     (out / "meta.json").write_text(json.dumps({
+        "setup_started_unix": setup_started,
         "started_unix": started,
         "ended_unix": ended,
+        "started_monotonic": started_mono,
+        "ended_monotonic": ended_mono,
         "functions": FUNCTIONS,
         "events": events,
         "irqs": irqs,
         "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
     }, indent=2) + "\n")
-    with (out / "kernel.log").open("w") as log:
-        subprocess.run(
-            ["journalctl", "-b", "-k", "--since", f"@{int(started)}",
-             "--until", f"@{int(ended) + 1}", "--no-pager"],
-            stdout=log, stderr=subprocess.STDOUT, check=False,
-        )
+    messages = subprocess.run(
+        ["dmesg", "--time-format=raw"], text=True,
+        capture_output=True, check=False,
+    )
+    if messages.returncode:
+        raise RuntimeError("dmesg failed: " + messages.stderr.strip())
+    pattern = re.compile(r"^\[\s*(\d+(?:\.\d+)?)\]")
+    lines = []
+    for line in messages.stdout.splitlines():
+        match = pattern.match(line)
+        if match and started_mono - 1 <= float(match.group(1)) <= ended_mono + 1:
+            lines.append(line)
+    (out / "kernel.log").write_text("\n".join(lines) + ("\n" if lines else ""))
     return out
 
 
