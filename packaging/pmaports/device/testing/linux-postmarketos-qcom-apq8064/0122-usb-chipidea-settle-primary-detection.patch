@@ -1,0 +1,90 @@
+From 1ef76f099062e52a7a4b3cb2375320ff8cb71215 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Wed, 18 Nov 2026 12:34:06 +0100
+Subject: [PATCH] usb: chipidea: settle APQ8064 primary detection before line
+ state
+
+The BC1.2 primary test drives the data lines. Reading PORTSC while
+that test bias is still active can label an SDP as a proprietary charger
+and authorize 1.2 A before gadget enumeration.
+
+Clear the Synopsys primary-test bits and wait 20 ms before sampling
+the line state, as the flo vendor driver does. Model the biased line in
+the KUnit fixture so SDP, CDP and DCP classification require this order.
+
+Signed-off-by: Gianluca Mazza <info@gianlucamazza.it>
+---
+ drivers/usb/chipidea/ci_hdrc_msm_bc12.c      |  5 +++++
+ drivers/usb/chipidea/ci_hdrc_msm_bc12_test.c | 18 +++++++++++++-----
+ 2 files changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/chipidea/ci_hdrc_msm_bc12.c b/drivers/usb/chipidea/ci_hdrc_msm_bc12.c
+index ad7000830..4303fec63 100644
+--- a/drivers/usb/chipidea/ci_hdrc_msm_bc12.c
++++ b/drivers/usb/chipidea/ci_hdrc_msm_bc12.c
+@@ -160,6 +160,11 @@ int ci_msm_bc12_detect(const struct ci_msm_bc12_io *io,
+ 		goto restore;
+ 	}
+ 	primary = !!(status & BIT(0));
++	/* Remove the primary test bias before interpreting the data lines. */
++	ret = io->write(io->context, SNPS_CHG_CTRL_CLR, 0x03);
++	if (ret)
++		goto restore;
++	io->wait_ms(io->context, 20);
+ 	status = io->line_state(io->context);
+ 	if (status < 0) {
+ 		ret = status;
+diff --git a/drivers/usb/chipidea/ci_hdrc_msm_bc12_test.c b/drivers/usb/chipidea/ci_hdrc_msm_bc12_test.c
+index e8e4fb1f5..d03836226 100644
+--- a/drivers/usb/chipidea/ci_hdrc_msm_bc12_test.c
++++ b/drivers/usb/chipidea/ci_hdrc_msm_bc12_test.c
+@@ -11,6 +11,7 @@ struct bc12_test_state {
+ 	bool proprietary;
+ 	bool failed;
+ 	bool primary_cleared;
++	bool primary_settled;
+ 	bool phy_suspended;
+ 	unsigned int wait_total_ms;
+ };
+@@ -46,12 +47,16 @@ static int bc12_test_write(void *context, u8 address, u8 value)
+ 	    !(value & ULPI_FUNC_CTRL_SUSPENDM))
+ 		state->phy_suspended = true;
+ 
+-	if (address == 0x86 && value == 0x3f)
++	if (address == 0x86 && value == 0x3f) {
+ 		state->primary_cleared = false;
+-	if (address == 0x86 && value == 0x03)
++		state->primary_settled = false;
++	}
++	if (address == 0x86 && value == 0x03) {
+ 		state->primary_cleared = true;
+-	/* The PHY must stay active between primary and secondary detection. */
+-	if (address == 0x85 && value == 0x08 && state->primary_cleared)
++		state->primary_settled = false;
++	}
++	/* Secondary detection must start after the primary source settles. */
++	if (address == 0x85 && value == 0x08 && !state->primary_settled)
+ 		return -ETIMEDOUT;
+ 
+ 	if (address == 0x85 && value == 0x10)
+@@ -74,13 +79,16 @@ static void bc12_test_wait(void *context, unsigned int milliseconds)
+ 	struct bc12_test_state *state = context;
+ 
+ 	state->wait_total_ms += milliseconds;
++	if (state->primary_cleared && milliseconds >= 20)
++		state->primary_settled = true;
+ }
+ 
+ static int bc12_test_line_state(void *context)
+ {
+ 	struct bc12_test_state *state = context;
+ 
+-	return state->proprietary ? 1 : 0;
++	/* Active primary bias can look like a proprietary D+ line. */
++	return state->proprietary || !state->primary_settled;
+ }
+ 
+ static void bc12_test_classification(struct kunit *test)
+-- 
+2.56.0
+

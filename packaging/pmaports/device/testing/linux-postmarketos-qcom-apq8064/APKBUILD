@@ -2,7 +2,7 @@ maintainer="Alexandre MINETTE <contact@alex-min.fr>"
 _flavor="postmarketos-qcom-apq8064"
 pkgname=linux-postmarketos-qcom-apq8064
 pkgver=7.2_p20261118101500
-pkgrel=42
+pkgrel=44
 _commit="cc2a6a249989c3bb23d3191afb97bf60f01d535f"
 pkgdesc="Mainline Kernel fork for APQ8064 devices"
 url="https://github.com/apq8064-mainline/linux"
@@ -71,6 +71,7 @@ source="
 	0119-arm-dts-flo-configure-usb-id-input.patch
 	0120-flo-charger-bc12-inok-extcon.patch
 	0121-drm-msm-dsi-trace-command-phases.patch
+	0122-usb-chipidea-settle-primary-detection.patch
 "
 builddir="$srcdir/linux-$_commit"
 
@@ -135,4 +136,5 @@ a50d66238b1d2f4c49c4cf89bf727ec84719e9eb01e2f59b484a32682e210e97449863b2b28ad48a
 a9ef29853a776968b3651763c6b51e457b7f137b1f2703494139e0585ea3cee8bf6c9b2a40f5975b71b8e5da6e01a6ac2a666d67e3d3920c2bef19a809c09548  0119-arm-dts-flo-configure-usb-id-input.patch
 4fd1948eed254700927735d51dd05d166c7fa59257b683642802e1dfedb34b53ae3f8e5a5069054a89204994994322798da5ee2c15c0dff89d5a29e3c672fee3  0120-flo-charger-bc12-inok-extcon.patch
 8a6c4e62c29c6150db3b71f8aaab72f4d3570acc2114198d1cf2502bad7eddf8ba72767b66b9f2b822a6258eaf370fdbeacc59d6b6b28454866516307e7cbaa3  0121-drm-msm-dsi-trace-command-phases.patch
+f20682e9d96888eaeea3f9466c1ff6f75bb4e9025a1de8eaa820e5543af02fb628061eb82a8fe615c3993fcbfb64417a39807097cd3e5b488d0924cf5338f53a  0122-usb-chipidea-settle-primary-detection.patch
 "

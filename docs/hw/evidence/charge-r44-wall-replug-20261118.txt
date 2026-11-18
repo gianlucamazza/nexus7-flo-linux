@@ -1,0 +1,5 @@
+sample=1 boot=ee220422-2a9d-4929-92c0-016d244a5e0a usb_type=Unknown current_max=0 hardware_icl=0x41 udc=not attached battery_status=Discharging battery_current=-726000 capacity=95
+sample=2 boot=ee220422-2a9d-4929-92c0-016d244a5e0a usb_type=DCP current_max=1200000 hardware_icl=0x44 udc=powered battery_status=Discharging battery_current=-764000 capacity=95
+sample=3 boot=ee220422-2a9d-4929-92c0-016d244a5e0a usb_type=DCP current_max=1200000 hardware_icl=0x44 udc=powered battery_status=Charging battery_current=262000 capacity=95
+sample=4 boot=ee220422-2a9d-4929-92c0-016d244a5e0a usb_type=DCP current_max=1200000 hardware_icl=0x44 udc=powered battery_status=Charging battery_current=291000 capacity=95
+sample=5 boot=ee220422-2a9d-4929-92c0-016d244a5e0a usb_type=DCP current_max=1200000 hardware_icl=0x44 udc=powered battery_status=Charging battery_current=304000 capacity=95
