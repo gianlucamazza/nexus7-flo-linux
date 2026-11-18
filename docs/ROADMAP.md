@@ -67,10 +67,18 @@ keyboard; the CLI runs on a 64-bit host the user owns. Userland is Nura
 Configure a host, list tools, launch mosh/ssh (optional tmux) to the user's
 own Claude Code, Codex CLI or Grok Build install, check reachability, print
 official host install/login commands, and uninstall our config/wrapper.
-No agent binary is installed on the tablet.
+No Claude/Codex/Grok binary is installed on the tablet.
+
+### Milestone 1b: CLI contract for flo-shell
+
+Touch UI configures everything through this CLI and never edits the config
+file. `config get/set/unset` (including `--json`), dedicated ed25519 key
+(`key ensure|show|qr`), launch/check with user, port, key and tmux prefix,
+and `check --json`. Optional local Charm Crush (`local install`, secrets
+file, `launch crush`). Details: [`flo-agents.md`](flo-agents.md).
 
 ### Milestone 2+: future work
 
-- flo-shell UI to pick a tool and attach to `flo-<tool>`
+- flo-shell UI on top of this CLI contract (pick a tool, attach, configure)
 - Session status and reconnect helpers in the shell
-- Optional host-side extras (still no local agent install on the tablet)
+- Optional host-side extras (still no Claude/Codex/Grok install on the tablet)
