@@ -69,6 +69,17 @@ in progress. This is a host regression and compile result, not a native
 touch/hotplug validation. The separate question of why the focus surface
 became null in the historical sequence remains open.
 
+Rollback prepared before native installation: the official Alpine edge
+armv7 `hyprland-0.54.3-r0.apk` is stored privately at
+`reports/rollback/hyprland-0.54.3-r0-armv7.apk`. `apk.static verify` with
+the cached Alpine public keys reports `OK`. Its SHA-256 is
+`cc8139dac97679dd04762893ddb9e30730a376885856bb35f1c27d327a5d0a4b`;
+the package's `/usr/bin/Hyprland` SHA-256 is
+`a6336feff09c8767fc1d05edadd3dfbeb38f078b4b25bdef0306e73560f26ee6`,
+identical to the running tablet's installed binary at the time of this
+check. Keep the diagnostic SSH path until explicitly instructed to remove
+it. The rollback APK has not been installed or copied to the tablet yet.
+
 The core was copied temporarily to a private host directory for analysis
 and deleted. This document contains no core memory or private firmware.
 
