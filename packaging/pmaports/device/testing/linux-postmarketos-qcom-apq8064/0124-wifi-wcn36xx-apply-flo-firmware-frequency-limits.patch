@@ -1,0 +1,127 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Wed, 18 Nov 2026 04:01:11 +0100
+Subject: [PATCH] wifi: wcn36xx: apply flo firmware frequency limits
+
+---
+ .../dts/qcom/qcom-apq8064-asus-nexus7-flo.dts |  7 ++++
+ arch/arm/boot/dts/qcom/qcom-apq8064.dtsi      |  2 +-
+ drivers/net/wireless/ath/wcn36xx/main.c       | 41 ++++++++++++++++---
+ 3 files changed, 44 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index d0b57d6ff..996fb04f0 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -447,6 +447,13 @@ iris {
+ 	};
+ };
+ 
++/* The flo WCNSS 1.4.1.2 firmware rejects channel 144 scan requests. */
++&wcnss_wifi {
++	ieee80211-freq-limit = <2400000 2500000>,
++			       <5150000 5710000>,
++			       <5730000 5900000>;
++};
++
+ /* The tablet idles around 60 C; start throttling well above that. */
+ &cpu_alert0 {
+ 	temperature = <85000>;
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064.dtsi b/arch/arm/boot/dts/qcom/qcom-apq8064.dtsi
+index b9d0bef37..09fa4c8da 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064.dtsi
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064.dtsi
+@@ -1839,7 +1839,7 @@ bluetooth {
+ 						compatible = "qcom,wcnss-bt";
+ 					};
+ 
+-					wifi {
++					wcnss_wifi: wifi {
+ 						compatible = "qcom,wcnss-wlan";
+ 
+ 						interrupts = <GIC_SPI 203 IRQ_TYPE_LEVEL_HIGH>,
+diff --git a/drivers/net/wireless/ath/wcn36xx/main.c b/drivers/net/wireless/ath/wcn36xx/main.c
+index 2be621123..effa1eaca 100644
+--- a/drivers/net/wireless/ath/wcn36xx/main.c
++++ b/drivers/net/wireless/ath/wcn36xx/main.c
+@@ -1427,6 +1427,26 @@ wcn36xx_set_ieee80211_vht_caps(struct ieee80211_sta_vht_cap *vht_cap)
+ 	vht_cap->vht_mcs.tx_mcs_map = vht_cap->vht_mcs.rx_mcs_map;
+ }
+ 
++static struct ieee80211_supported_band *
++wcn36xx_alloc_band(struct wcn36xx *wcn,
++		   const struct ieee80211_supported_band *template)
++{
++	struct ieee80211_supported_band *band;
++	struct ieee80211_channel *channels;
++	size_t channels_size = template->n_channels * sizeof(*channels);
++
++	band = devm_kmemdup(wcn->dev, template, sizeof(*band), GFP_KERNEL);
++	if (!band)
++		return ERR_PTR(-ENOMEM);
++
++	channels = devm_kmemdup(wcn->dev, template->channels, channels_size, GFP_KERNEL);
++	if (!channels)
++		return ERR_PTR(-ENOMEM);
++
++	band->channels = channels;
++	return band;
++}
++
+ static int wcn36xx_init_ieee80211(struct wcn36xx *wcn)
+ {
+ 	static const u32 cipher_suites[] = {
+@@ -1435,6 +1455,7 @@ static int wcn36xx_init_ieee80211(struct wcn36xx *wcn)
+ 		WLAN_CIPHER_SUITE_TKIP,
+ 		WLAN_CIPHER_SUITE_CCMP,
+ 	};
++	struct ieee80211_supported_band *band;
+ 
+ 	ieee80211_hw_set(wcn->hw, TIMING_BEACON_ONLY);
+ 	ieee80211_hw_set(wcn->hw, AMPDU_AGGREGATION);
+@@ -1449,12 +1470,19 @@ static int wcn36xx_init_ieee80211(struct wcn36xx *wcn)
+ 		BIT(NL80211_IFTYPE_ADHOC) |
+ 		BIT(NL80211_IFTYPE_MESH_POINT);
+ 
+-	wcn->hw->wiphy->bands[NL80211_BAND_2GHZ] = &wcn_band_2ghz;
+-	if (wcn->rf_id != RF_IRIS_WCN3620)
+-		wcn->hw->wiphy->bands[NL80211_BAND_5GHZ] = &wcn_band_5ghz;
++	band = wcn36xx_alloc_band(wcn, &wcn_band_2ghz);
++	if (IS_ERR(band))
++		return PTR_ERR(band);
++	wcn->hw->wiphy->bands[NL80211_BAND_2GHZ] = band;
++	if (wcn->rf_id != RF_IRIS_WCN3620) {
++		band = wcn36xx_alloc_band(wcn, &wcn_band_5ghz);
++		if (IS_ERR(band))
++			return PTR_ERR(band);
++		wcn->hw->wiphy->bands[NL80211_BAND_5GHZ] = band;
++	}
+ 
+ 	if (wcn->rf_id == RF_IRIS_WCN3680)
+-		wcn36xx_set_ieee80211_vht_caps(&wcn_band_5ghz.vht_cap);
++		wcn36xx_set_ieee80211_vht_caps(&band->vht_cap);
+ 
+ 	wcn->hw->wiphy->max_scan_ssids = WCN36XX_MAX_SCAN_SSIDS;
+ 	wcn->hw->wiphy->max_scan_ie_len = WCN36XX_MAX_SCAN_IE_LEN;
+@@ -1471,6 +1499,7 @@ static int wcn36xx_init_ieee80211(struct wcn36xx *wcn)
+ 	wcn->hw->queues = 4;
+ 
+ 	SET_IEEE80211_DEV(wcn->hw, wcn->dev);
++	wiphy_read_of_freq_limits(wcn->hw->wiphy);
+ 
+ 	wcn->hw->sta_data_size = sizeof(struct wcn36xx_sta);
+ 	wcn->hw->vif_data_size = sizeof(struct wcn36xx_vif);
+@@ -1637,7 +1666,9 @@ static int wcn36xx_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto out_destroy_ept;
+ 
+-	wcn36xx_init_ieee80211(wcn);
++	ret = wcn36xx_init_ieee80211(wcn);
++	if (ret)
++		goto out_unmap;
+ 	ret = ieee80211_register_hw(wcn->hw);
+ 	if (ret)
+ 		goto out_unmap;
+-- 
+2.56.0
+

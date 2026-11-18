@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Wed, 18 Nov 2026 03:53:34 +0100
+Subject: [PATCH] wifi: wcn36xx: propagate firmware scan channel failures
+
+---
+ drivers/net/wireless/ath/wcn36xx/main.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/net/wireless/ath/wcn36xx/main.c b/drivers/net/wireless/ath/wcn36xx/main.c
+index 0f00eca66..2be621123 100644
+--- a/drivers/net/wireless/ath/wcn36xx/main.c
++++ b/drivers/net/wireless/ath/wcn36xx/main.c
+@@ -411,7 +411,12 @@ static int wcn36xx_config(struct ieee80211_hw *hw, int radio_idx, u32 changed)
+ 					return -EIO;
+ 				}
+ 			}
+-			wcn36xx_smd_start_scan(wcn, ch);
++			ret = wcn36xx_smd_start_scan(wcn, ch);
++			if (ret) {
++				/* Let mac80211 skip a channel rejected by firmware. */
++				mutex_unlock(&wcn->conf_mutex);
++				return -EIO;
++			}
+ 		} else {
+ 			wcn36xx_change_opchannel(wcn, ch);
+ 		}
+-- 
+2.56.0
+
