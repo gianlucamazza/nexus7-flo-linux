@@ -15,6 +15,11 @@ La base scelta è postmarketOS, dispositivo `asus-flo`. Questo repository
 pubblica sorgenti, ricetta del kernel e risultati delle prove; gli APK,
 i backup del tablet e le chiavi diagnostiche restano fuori dal repository.
 
+Il comando opzionale [`flo-agents`](docs/flo-agents.md) configura sessioni
+agente remote e Crush locale per la UI di flo-shell. Le sessioni remote
+richiedono un host e una configurazione esplicita; nessun agente viene
+installato o configurato automaticamente sul tablet.
+
 ## Stato corrente (18 novembre 2026)
 
 Sul tablet è installato il kernel diagnostico r48. Tre avvii consecutivi

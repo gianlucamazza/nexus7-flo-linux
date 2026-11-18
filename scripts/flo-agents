@@ -1,0 +1,1464 @@
+#!/bin/sh
+# flo-agents — experimental opt-in helper. The tablet is the screen and
+# keyboard; remote agent CLIs run on a 64-bit host the user owns. This
+# script never downloads Claude Code, Codex CLI or Grok Build. Optional
+# local mode can install Charm Crush (official Linux armv7/arm64/x86_64
+# release). Config stores no secrets; API keys live in a separate 600 file.
+# Userland: Nura (formerly postmarketOS), not a distro of this project.
+set -eu
+
+KNOWN_AGENTS='claude codex grok'
+
+# Pinned Charm Crush release. SHA-256 values are copied from the official
+# checksums.txt for this tag. FLO_AGENTS_TEST_CRUSH_SHA256 overrides the
+# pinned hash and is a test-only interface; do not set it on a device.
+CRUSH_VERSION='0.101.0'
+CRUSH_RELEASE_TAG='v0.101.0'
+CRUSH_SHA256_Linux_armv7='a1bd243ac495461c7714a6e5819820c32c3a86db446b937dd0b0e63d0999cfa5'
+CRUSH_SHA256_Linux_arm64='ebbc141e80ad19d321b89558c2513fac5bebabd97530570ce749902dc4411f05'
+CRUSH_SHA256_Linux_x86_64='cf234948e3d7c5236d18a048a38f25a7df9ca24ba0b8fdaa525d45c5f705f99a'
+
+die() {
+	printf '%s\n' "$*" >&2
+	exit 1
+}
+
+valid_fail() {
+	printf '%s\n' "$*" >&2
+	exit 2
+}
+
+usage() {
+	printf '%s\n' \
+		'usage: flo-agents <command> [args]' \
+		'' \
+		'experimental remote-session helper (opt-in).' \
+		'This device is a screen and keyboard; CLIs run on a 64-bit host you own.' \
+		'' \
+		'commands:' \
+		'  setup          write config (and a ~/.local/bin wrapper)' \
+		'  config get     print a key, or --json for the full object' \
+		'  config set     set a key (creates config if missing)' \
+		'  config unset   reset a key to its default' \
+		'  key ensure     create ~/.ssh/flo_agents_ed25519 if missing' \
+		'  key show       print the public key' \
+		'  key qr         write a QR PNG of the public key' \
+		'  secret set     read api_key from STDIN into the secrets file' \
+		'  secret status  print set/unset and last 4 characters' \
+		'  secret unset   remove the stored API key' \
+		'  local install  opt-in Charm Crush (official release, checksummed)' \
+		'  local status   JSON: installed, version, path' \
+		'  local uninstall  remove Crush tree, symlink and our crush config' \
+		'  list           print configured tool ids, one per line' \
+		'  launch [tool]  exec mosh/ssh session, or local crush' \
+		'  check          test host reachability and remote commands' \
+		'  host-help      print official host install/login commands' \
+		'  uninstall      remove our config and wrapper only' \
+		'  install        refused: never installs Claude/Codex/Grok here' >&2
+}
+
+script_path() {
+	src=$0
+	case $src in
+	/*) ;;
+	*) src=$PWD/$src ;;
+	esac
+	if command -v readlink >/dev/null 2>&1; then
+		resolved=$(readlink -f "$src" 2>/dev/null) || resolved=
+		[ -n "$resolved" ] && src=$resolved
+	fi
+	printf '%s\n' "$src"
+}
+
+config_dir() {
+	if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+		printf '%s\n' "$XDG_CONFIG_HOME/flo-agents"
+	else
+		printf '%s\n' "${HOME:?}/.config/flo-agents"
+	fi
+}
+
+config_file() {
+	printf '%s/config\n' "$(config_dir)"
+}
+
+wrapper_path() {
+	printf '%s\n' "${HOME:?}/.local/bin/flo-agents"
+}
+
+agent_key_file() {
+	printf '%s\n' "${HOME:?}/.ssh/flo_agents_ed25519"
+}
+
+agent_key_pub() {
+	printf '%s.pub\n' "$(agent_key_file)"
+}
+
+json_escape() {
+	# Tiny JSON string escaper (no jq). POSIX awk.
+	printf '%s' "$1" | awk '
+		BEGIN {
+			ORS = ""
+			for (i = 0; i < 256; i++) {
+				ord[sprintf("%c", i)] = i
+			}
+		}
+		{
+			if (NR > 1) printf "\\n"
+			n = length($0)
+			for (i = 1; i <= n; i++) {
+				c = substr($0, i, 1)
+				o = ord[c]
+				if (c == "\\") printf "\\\\"
+				else if (c == "\"") printf "\\\""
+				else if (o == 8) printf "\\b"
+				else if (o == 9) printf "\\t"
+				else if (o == 12) printf "\\f"
+				else if (o == 13) printf "\\r"
+				else if (o < 32) printf "\\u%04x", o
+				else printf "%s", c
+			}
+		}
+	'
+}
+
+require_safe_value() {
+	case $1 in
+	*"'"*) valid_fail "invalid config value" ;;
+	esac
+}
+
+validate_host() {
+	[ -n "$1" ] || valid_fail "host is required"
+	case $1 in
+	-*) valid_fail "host must not start with -" ;;
+	esac
+	nl='
+'
+	case $1 in
+	*" "*|*"	"*|*"'"*|*"\""*|*"@"*|*"$nl"*)
+		valid_fail "host must be a hostname, IPv4 or IPv6 token"
+		;;
+	esac
+	case $1 in
+	*[!A-Za-z0-9._:\[\]-]*)
+		valid_fail "host must be a hostname, IPv4 or IPv6 token"
+		;;
+	esac
+}
+
+validate_user() {
+	[ -n "$1" ] || valid_fail "user is required"
+	case $1 in
+	-*) valid_fail "user must not start with -" ;;
+	*[!A-Za-z0-9._-]*) valid_fail "user must match [A-Za-z0-9._-]" ;;
+	esac
+}
+
+validate_port() {
+	case $1 in
+	''|*[!0-9]*|0*) valid_fail "port must be an integer from 1 to 65535" ;;
+	esac
+	if [ "$1" -lt 1 ] || [ "$1" -gt 65535 ]; then
+		valid_fail "port must be an integer from 1 to 65535"
+	fi
+}
+
+validate_transport() {
+	case $1 in
+	mosh|ssh) ;;
+	*) valid_fail "transport must be mosh or ssh" ;;
+	esac
+}
+
+validate_agent() {
+	case $1 in
+	claude|codex|grok) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+validate_cmd() {
+	nl='
+'
+	case $1 in
+	*"'"*|*${nl}*) valid_fail "command must not contain single quotes or newlines" ;;
+	esac
+	fw=$(first_word "$1")
+	[ -n "$fw" ] || valid_fail "command must have a non-empty first word"
+}
+
+validate_tmux_prefix() {
+	[ -n "$1" ] || valid_fail "tmux_prefix must match [A-Za-z0-9_-]"
+	case $1 in
+	*[!A-Za-z0-9_-]*) valid_fail "tmux_prefix must match [A-Za-z0-9_-]" ;;
+	esac
+}
+
+parse_tmux() {
+	case $1 in
+	1|on) FLO_AGENT_TMUX=1 ;;
+	0|off) FLO_AGENT_TMUX=0 ;;
+	*) valid_fail "tmux must be on, off, 1 or 0" ;;
+	esac
+}
+
+validate_local_provider() {
+	case $1 in
+	anthropic|openai|xai|openai-compat|ollama|llamacpp) ;;
+	*) valid_fail "local.provider must be anthropic, openai, xai, openai-compat, ollama or llamacpp" ;;
+	esac
+}
+
+validate_base_url() {
+	nl='
+'
+	case $1 in
+	http://*|https://*) ;;
+	*) valid_fail "local.base_url must be an http or https URL" ;;
+	esac
+	case $1 in
+	*" "*|*"	"*|*"'"*|*"\""*|*"$nl"*)
+		valid_fail "local.base_url must be an http or https URL"
+		;;
+	esac
+}
+
+validate_local_model() {
+	nl='
+'
+	[ -n "$1" ] || valid_fail "local.model is required"
+	case $1 in
+	*"'"*|*${nl}*) valid_fail "local.model must not contain single quotes or newlines" ;;
+	esac
+	require_safe_value "$1"
+}
+
+normalize_agents() {
+	# comma or space separated -> space separated tokens
+	printf '%s' "$1" | tr ',\t' '  '
+}
+
+agent_in_list() {
+	needle=$1
+	shift
+	for item in "$@"; do
+		[ "$item" = "$needle" ] && return 0
+	done
+	return 1
+}
+
+posix_dirname() {
+	case $1 in
+	*/*) printf '%s\n' "${1%/*}" ;;
+	*) printf '.\n' ;;
+	esac
+}
+
+first_word() {
+	set -f
+	# shellcheck disable=SC2086
+	set -- $1
+	set +f
+	printf '%s\n' "${1:-}"
+}
+
+split_legacy_host() {
+	raw=${FLO_AGENT_HOST:-}
+	case $raw in
+	*@*)
+		h=${raw##*@}
+		u=${raw%@*}
+		FLO_AGENT_HOST=$h
+		if [ -z "${FLO_AGENT_USER:-}" ]; then
+			FLO_AGENT_USER=$u
+		fi
+		;;
+	esac
+}
+
+init_defaults() {
+	configured=0
+	FLO_AGENT_HOST=
+	FLO_AGENT_USER=
+	FLO_AGENT_PORT=22
+	FLO_AGENT_TRANSPORT=mosh
+	FLO_AGENTS=$KNOWN_AGENTS
+	FLO_AGENT_DEFAULT=claude
+	FLO_AGENT_CMD_claude=claude
+	FLO_AGENT_CMD_codex=codex
+	FLO_AGENT_CMD_grok=grok
+	FLO_AGENT_TMUX=1
+	FLO_AGENT_TMUX_PREFIX=flo
+	FLO_AGENT_LOCAL_PROVIDER=
+	FLO_AGENT_LOCAL_BASE_URL=
+	FLO_AGENT_LOCAL_MODEL=
+}
+
+load_state() {
+	init_defaults
+	cfg=$(config_file)
+	if [ -f "$cfg" ]; then
+		configured=1
+		# shellcheck disable=SC1090
+		. "$cfg"
+	fi
+	split_legacy_host
+	FLO_AGENT_PORT=${FLO_AGENT_PORT:-22}
+	FLO_AGENT_TRANSPORT=${FLO_AGENT_TRANSPORT:-mosh}
+	FLO_AGENTS=${FLO_AGENTS:-$KNOWN_AGENTS}
+	FLO_AGENT_DEFAULT=${FLO_AGENT_DEFAULT:-${FLO_AGENTS%% *}}
+	FLO_AGENT_TMUX=${FLO_AGENT_TMUX:-1}
+	FLO_AGENT_TMUX_PREFIX=${FLO_AGENT_TMUX_PREFIX:-flo}
+	FLO_AGENT_CMD_claude=${FLO_AGENT_CMD_claude:-claude}
+	FLO_AGENT_CMD_codex=${FLO_AGENT_CMD_codex:-codex}
+	FLO_AGENT_CMD_grok=${FLO_AGENT_CMD_grok:-grok}
+	FLO_AGENT_LOCAL_PROVIDER=${FLO_AGENT_LOCAL_PROVIDER:-}
+	FLO_AGENT_LOCAL_BASE_URL=${FLO_AGENT_LOCAL_BASE_URL:-}
+	FLO_AGENT_LOCAL_MODEL=${FLO_AGENT_LOCAL_MODEL:-}
+	case $FLO_AGENT_TMUX in
+	1|on|ON) FLO_AGENT_TMUX=1 ;;
+	*) FLO_AGENT_TMUX=0 ;;
+	esac
+}
+
+load_config() {
+	cfg=$(config_file)
+	[ -f "$cfg" ] || die "no config; run: flo-agents setup"
+	load_state
+	[ -n "${FLO_AGENT_HOST:-}" ] || die "FLO_AGENT_HOST missing"
+	validate_host "$FLO_AGENT_HOST"
+	if [ -n "${FLO_AGENT_USER:-}" ]; then
+		validate_user "$FLO_AGENT_USER"
+	fi
+	[ -n "${FLO_AGENTS:-}" ] || die "FLO_AGENTS missing"
+	for t in $FLO_AGENTS; do
+		validate_agent "$t" || die "unknown agent in config: $t"
+	done
+	[ -n "${FLO_AGENT_DEFAULT:-}" ] || FLO_AGENT_DEFAULT=${FLO_AGENTS%% *}
+}
+
+remote_cmd_for() {
+	tool=$1
+	validate_agent "$tool" || die "unknown agent: $tool"
+	eval "printf '%s\n' \"\${FLO_AGENT_CMD_${tool}:-$tool}\""
+}
+
+ssh_dest() {
+	h=$FLO_AGENT_HOST
+	u=${FLO_AGENT_USER:-}
+	case $h in
+	*:*)
+		case $h in
+		\[*\]) ;;
+		*) h="[$h]" ;;
+		esac
+		;;
+	esac
+	if [ -n "$u" ]; then
+		printf '%s@%s\n' "$u" "$h"
+	else
+		printf '%s\n' "$h"
+	fi
+}
+
+ssh_bootstrap() {
+	key=$(agent_key_file)
+	if [ -f "$key" ]; then
+		printf 'ssh -p %s -i %s -o IdentitiesOnly=yes' "$FLO_AGENT_PORT" "$key"
+	else
+		printf 'ssh -p %s' "$FLO_AGENT_PORT"
+	fi
+}
+
+run_ssh_check() {
+	dest=$(ssh_dest)
+	key=$(agent_key_file)
+	if [ -f "$key" ]; then
+		ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+			-p "$FLO_AGENT_PORT" -i "$key" -o IdentitiesOnly=yes -- "$dest" "$@"
+	else
+		ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+			-p "$FLO_AGENT_PORT" -- "$dest" "$@"
+	fi
+}
+
+classify_host_key() {
+	msg=$1
+	reachable=$2
+	case $msg in
+	*"REMOTE HOST IDENTIFICATION HAS CHANGED"*)
+		printf '%s\n' changed
+		return
+		;;
+	*"Permanently added"*)
+		printf '%s\n' new
+		return
+		;;
+	esac
+	if [ "$reachable" = 1 ]; then
+		printf '%s\n' known
+	else
+		printf '%s\n' unknown
+	fi
+}
+
+write_config() {
+	dir=$(config_dir)
+	cfg=$dir/config
+	mkdir -p "$dir"
+	chmod 700 "$dir"
+	umask 077
+	tmp=$dir/config.tmp.$$
+	{
+		printf '%s\n' '# flo-agents config. POSIX sh key=value. No secrets.'
+		printf "FLO_AGENT_HOST='%s'\n" "$FLO_AGENT_HOST"
+		printf "FLO_AGENT_USER='%s'\n" "$FLO_AGENT_USER"
+		printf "FLO_AGENT_PORT=%s\n" "$FLO_AGENT_PORT"
+		printf "FLO_AGENT_TRANSPORT='%s'\n" "$FLO_AGENT_TRANSPORT"
+		printf "FLO_AGENTS='%s'\n" "$FLO_AGENTS"
+		printf "FLO_AGENT_DEFAULT='%s'\n" "$FLO_AGENT_DEFAULT"
+		# shellcheck disable=SC2086
+		for t in $FLO_AGENTS; do
+			c=$t
+			eval "c=\${FLO_AGENT_CMD_${t}:-$t}"
+			printf "FLO_AGENT_CMD_%s='%s'\n" "$t" "$c"
+		done
+		printf "FLO_AGENT_TMUX=%s\n" "$FLO_AGENT_TMUX"
+		printf "FLO_AGENT_TMUX_PREFIX='%s'\n" "$FLO_AGENT_TMUX_PREFIX"
+		printf "FLO_AGENT_LOCAL_PROVIDER='%s'\n" "$FLO_AGENT_LOCAL_PROVIDER"
+		printf "FLO_AGENT_LOCAL_BASE_URL='%s'\n" "$FLO_AGENT_LOCAL_BASE_URL"
+		printf "FLO_AGENT_LOCAL_MODEL='%s'\n" "$FLO_AGENT_LOCAL_MODEL"
+	} >"$tmp"
+	chmod 600 "$tmp"
+	mv "$tmp" "$cfg"
+}
+
+cfg_apply() {
+	key=$1
+	value=$2
+	case $key in
+	host)
+		validate_host "$value"
+		require_safe_value "$value"
+		FLO_AGENT_HOST=$value
+		;;
+	user)
+		validate_user "$value"
+		FLO_AGENT_USER=$value
+		;;
+	port)
+		validate_port "$value"
+		FLO_AGENT_PORT=$value
+		;;
+	transport)
+		validate_transport "$value"
+		FLO_AGENT_TRANSPORT=$value
+		;;
+	agents)
+		# shellcheck disable=SC2046,SC2086
+		set -- $(normalize_agents "$value")
+		[ $# -gt 0 ] || valid_fail "agents must be a non-empty subset of: $KNOWN_AGENTS"
+		out=
+		first=
+		for t in "$@"; do
+			validate_agent "$t" || valid_fail "unknown agent: $t (want claude, codex and/or grok)"
+			# shellcheck disable=SC2086
+			if [ -n "$out" ] && agent_in_list "$t" $out; then
+				continue
+			fi
+			[ -n "$first" ] || first=$t
+			out="${out:+$out }$t"
+		done
+		FLO_AGENTS=$out
+		# shellcheck disable=SC2086
+		if ! agent_in_list "$FLO_AGENT_DEFAULT" $FLO_AGENTS; then
+			FLO_AGENT_DEFAULT=$first
+		fi
+		;;
+	default)
+		validate_agent "$value" || valid_fail "unknown default agent: $value"
+		# shellcheck disable=SC2086
+		agent_in_list "$value" $FLO_AGENTS || valid_fail "default $value is not in agents"
+		FLO_AGENT_DEFAULT=$value
+		;;
+	cmd.claude|cmd.codex|cmd.grok)
+		tool=${key#cmd.}
+		validate_cmd "$value"
+		eval "FLO_AGENT_CMD_${tool}=\$value"
+		;;
+	tmux)
+		parse_tmux "$value"
+		;;
+	tmux_prefix)
+		validate_tmux_prefix "$value"
+		FLO_AGENT_TMUX_PREFIX=$value
+		;;
+	local.provider)
+		validate_local_provider "$value"
+		FLO_AGENT_LOCAL_PROVIDER=$value
+		;;
+	local.base_url)
+		validate_base_url "$value"
+		FLO_AGENT_LOCAL_BASE_URL=$value
+		;;
+	local.model)
+		validate_local_model "$value"
+		FLO_AGENT_LOCAL_MODEL=$value
+		;;
+	*)
+		valid_fail "unknown key: $key"
+		;;
+	esac
+}
+
+cfg_unset() {
+	key=$1
+	case $key in
+	host) FLO_AGENT_HOST= ;;
+	user) FLO_AGENT_USER= ;;
+	port) FLO_AGENT_PORT=22 ;;
+	transport) FLO_AGENT_TRANSPORT=mosh ;;
+	agents)
+		FLO_AGENTS=$KNOWN_AGENTS
+		# shellcheck disable=SC2086
+		if ! agent_in_list "$FLO_AGENT_DEFAULT" $FLO_AGENTS; then
+			FLO_AGENT_DEFAULT=${FLO_AGENTS%% *}
+		fi
+		;;
+	default) FLO_AGENT_DEFAULT=${FLO_AGENTS%% *} ;;
+	cmd.claude) FLO_AGENT_CMD_claude=claude ;;
+	cmd.codex) FLO_AGENT_CMD_codex=codex ;;
+	cmd.grok) FLO_AGENT_CMD_grok=grok ;;
+	tmux) FLO_AGENT_TMUX=1 ;;
+	tmux_prefix) FLO_AGENT_TMUX_PREFIX=flo ;;
+	local.provider) FLO_AGENT_LOCAL_PROVIDER= ;;
+	local.base_url) FLO_AGENT_LOCAL_BASE_URL= ;;
+	local.model) FLO_AGENT_LOCAL_MODEL= ;;
+	*) valid_fail "unknown key: $key" ;;
+	esac
+}
+
+print_public_key() {
+	pub=$(agent_key_pub)
+	[ -f "$pub" ] || return 1
+	IFS= read -r line <"$pub" || true
+	[ -n "$line" ] || return 1
+	printf '%s\n' "$line"
+}
+
+print_config_json() {
+	load_state
+	if [ "$configured" = 1 ]; then
+		conf_json=true
+	else
+		conf_json=false
+	fi
+	if [ "$FLO_AGENT_TMUX" = 1 ]; then
+		tmux_json=true
+	else
+		tmux_json=false
+	fi
+	agents_json='['
+	sep=
+	for t in $FLO_AGENTS; do
+		agents_json="$agents_json$sep\"$t\""
+		sep=,
+	done
+	agents_json="$agents_json]"
+	key_present=false
+	pub_line=
+	if line=$(print_public_key); then
+		key_present=true
+		pub_line=$line
+	fi
+	if crush_ready; then
+		agents_json="${agents_json%]},\"crush\"]"
+	fi
+	if secret_is_set; then
+		key_set_json=true
+	else
+		key_set_json=false
+	fi
+	if crush_installed; then
+		installed_json=true
+		crush_ver=$CRUSH_VERSION
+	else
+		installed_json=false
+		crush_ver=
+	fi
+	printf '{"configured":%s,"host":"%s","user":"%s","port":%s,"transport":"%s","agents":%s,"default":"%s","cmd":{"claude":"%s","codex":"%s","grok":"%s"},"tmux":%s,"tmux_prefix":"%s","key":{"present":%s,"public":"%s"},"local":{"provider":"%s","base_url":"%s","model":"%s","key_set":%s,"installed":%s,"version":"%s","mode":"local"}}\n' \
+		"$conf_json" \
+		"$(json_escape "$FLO_AGENT_HOST")" \
+		"$(json_escape "$FLO_AGENT_USER")" \
+		"$FLO_AGENT_PORT" \
+		"$(json_escape "$FLO_AGENT_TRANSPORT")" \
+		"$agents_json" \
+		"$(json_escape "$FLO_AGENT_DEFAULT")" \
+		"$(json_escape "$FLO_AGENT_CMD_claude")" \
+		"$(json_escape "$FLO_AGENT_CMD_codex")" \
+		"$(json_escape "$FLO_AGENT_CMD_grok")" \
+		"$tmux_json" \
+		"$(json_escape "$FLO_AGENT_TMUX_PREFIX")" \
+		"$key_present" \
+		"$(json_escape "$pub_line")" \
+		"$(json_escape "$FLO_AGENT_LOCAL_PROVIDER")" \
+		"$(json_escape "$FLO_AGENT_LOCAL_BASE_URL")" \
+		"$(json_escape "$FLO_AGENT_LOCAL_MODEL")" \
+		"$key_set_json" \
+		"$installed_json" \
+		"$(json_escape "$crush_ver")"
+}
+
+cmd_config_get() {
+	if [ "${1:-}" = --json ]; then
+		print_config_json
+		exit 0
+	fi
+	[ $# -eq 1 ] || valid_fail "usage: flo-agents config get [--json|<key>]"
+	load_state
+	case $1 in
+	host) printf '%s\n' "$FLO_AGENT_HOST" ;;
+	user) printf '%s\n' "$FLO_AGENT_USER" ;;
+	port) printf '%s\n' "$FLO_AGENT_PORT" ;;
+	transport) printf '%s\n' "$FLO_AGENT_TRANSPORT" ;;
+	agents) printf '%s\n' "$FLO_AGENTS" ;;
+	default) printf '%s\n' "$FLO_AGENT_DEFAULT" ;;
+	cmd.claude) printf '%s\n' "$FLO_AGENT_CMD_claude" ;;
+	cmd.codex) printf '%s\n' "$FLO_AGENT_CMD_codex" ;;
+	cmd.grok) printf '%s\n' "$FLO_AGENT_CMD_grok" ;;
+	tmux) printf '%s\n' "$FLO_AGENT_TMUX" ;;
+	tmux_prefix) printf '%s\n' "$FLO_AGENT_TMUX_PREFIX" ;;
+	local.provider) printf '%s\n' "$FLO_AGENT_LOCAL_PROVIDER" ;;
+	local.base_url) printf '%s\n' "$FLO_AGENT_LOCAL_BASE_URL" ;;
+	local.model) printf '%s\n' "$FLO_AGENT_LOCAL_MODEL" ;;
+	*) valid_fail "unknown key: $1" ;;
+	esac
+}
+
+cmd_config_set() {
+	[ $# -eq 2 ] || valid_fail "usage: flo-agents config set <key> <value>"
+	load_state
+	cfg_apply "$1" "$2"
+	write_config
+}
+
+cmd_config_unset() {
+	[ $# -eq 1 ] || valid_fail "usage: flo-agents config unset <key>"
+	load_state
+	cfg_unset "$1"
+	write_config
+}
+
+cmd_config() {
+	sub=${1:-}
+	if [ $# -gt 0 ]; then
+		shift
+	fi
+	case $sub in
+	get) cmd_config_get "$@" ;;
+	set) cmd_config_set "$@" ;;
+	unset) cmd_config_unset "$@" ;;
+	*) die "usage: flo-agents config get|set|unset ..." ;;
+	esac
+}
+
+install_wrapper() {
+	self=$(script_path)
+	wrap=$(wrapper_path)
+	wrap_dir=$(posix_dirname "$wrap")
+	mkdir -p "$wrap_dir"
+	if [ "$self" != "$wrap" ]; then
+		ln -sf "$self" "$wrap"
+	fi
+}
+
+cmd_setup() {
+	force=0
+	host=
+	transport=
+	agents=
+	default=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--force) force=1; shift ;;
+		--host)
+			[ $# -ge 2 ] || die "missing value for --host"
+			host=$2; shift 2 ;;
+		--host=*) host=${1#--host=}; shift ;;
+		--transport)
+			[ $# -ge 2 ] || die "missing value for --transport"
+			transport=$2; shift 2 ;;
+		--transport=*) transport=${1#--transport=}; shift ;;
+		--agents)
+			[ $# -ge 2 ] || die "missing value for --agents"
+			agents=$2; shift 2 ;;
+		--agents=*) agents=${1#--agents=}; shift ;;
+		--default)
+			[ $# -ge 2 ] || die "missing value for --default"
+			default=$2; shift 2 ;;
+		--default=*) default=${1#--default=}; shift ;;
+		-h|--help)
+			printf '%s\n' 'usage: flo-agents setup [--force] [--host user@host.example] [--transport mosh|ssh] [--agents "claude codex grok"] [--default claude]' >&2
+			exit 0 ;;
+		*) die "unknown option: $1" ;;
+		esac
+	done
+
+	if [ -z "$host" ]; then
+		if [ -t 0 ]; then
+			printf 'Remote host (user@host.example): ' >&2
+			read -r host
+		else
+			die "missing --host (or run interactively on a tty)"
+		fi
+	fi
+	case $host in
+	-*) valid_fail "host must not start with -" ;;
+	esac
+	setup_user=
+	setup_host=$host
+	case $host in
+	*@*)
+		setup_user=${host%@*}
+		setup_host=${host##*@}
+		;;
+	esac
+
+	if [ -z "$transport" ]; then
+		if [ -t 0 ] && [ -z "${FLO_AGENTS_NONINTERACTIVE:-}" ]; then
+			printf 'Transport (mosh/ssh) [mosh]: ' >&2
+			read -r transport
+		fi
+		transport=${transport:-mosh}
+	fi
+
+	if [ -z "$agents" ]; then
+		if [ -t 0 ] && [ -z "${FLO_AGENTS_NONINTERACTIVE:-}" ]; then
+			printf 'Agents (claude, codex, grok) [claude codex grok]: ' >&2
+			read -r agents
+		fi
+		agents=${agents:-$KNOWN_AGENTS}
+	fi
+
+	# shellcheck disable=SC2046,SC2086
+	set -- $(normalize_agents "$agents")
+	first=${1:-}
+	if [ -z "$default" ]; then
+		if [ -t 0 ] && [ -z "${FLO_AGENTS_NONINTERACTIVE:-}" ]; then
+			printf 'Default agent [%s]: ' "$first" >&2
+			read -r default
+		fi
+		default=${default:-$first}
+	fi
+
+	dir=$(config_dir)
+	cfg=$dir/config
+	if [ -e "$cfg" ] && [ "$force" != 1 ]; then
+		if [ -t 0 ]; then
+			printf 'Config %s exists. Overwrite? [y/N] ' "$cfg" >&2
+			read -r ans
+			case $ans in
+			y|Y|yes|YES) ;;
+			*) die "not overwriting $cfg (pass --force)" ;;
+			esac
+		else
+			die "config exists; pass --force"
+		fi
+	fi
+
+	init_defaults
+	cfg_apply host "$setup_host"
+	if [ -n "$setup_user" ]; then
+		cfg_apply user "$setup_user"
+	fi
+	cfg_apply transport "$transport"
+	cfg_apply agents "$agents"
+	cfg_apply default "$default"
+	write_config
+	install_wrapper
+	printf 'wrote %s\n' "$(config_file)" >&2
+}
+
+cmd_list() {
+	cfg=$(config_file)
+	[ -f "$cfg" ] || die "no config; run: flo-agents setup"
+	load_state
+	if [ -n "${FLO_AGENT_HOST:-}" ]; then
+		validate_host "$FLO_AGENT_HOST"
+	fi
+	for t in $FLO_AGENTS; do
+		printf '%s\n' "$t"
+	done
+	if crush_ready; then
+		printf '%s\n' crush
+	fi
+}
+
+cmd_launch() {
+	tool=${1:-}
+	[ $# -le 1 ] || die "usage: flo-agents launch [tool]"
+	if [ "$tool" = crush ]; then
+		cmd_launch_crush
+		return
+	fi
+	load_config
+	if [ -z "$tool" ]; then
+		tool=$FLO_AGENT_DEFAULT
+	fi
+	if [ "$tool" = crush ]; then
+		cmd_launch_crush
+		return
+	fi
+	validate_agent "$tool" || die "unknown agent: $tool"
+	# shellcheck disable=SC2086
+	agent_in_list "$tool" $FLO_AGENTS || die "tool not configured: $tool"
+	cmd=$(remote_cmd_for "$tool")
+	[ -n "$cmd" ] || die "empty remote command for $tool"
+
+	transport=${FLO_AGENT_TRANSPORT:-mosh}
+	validate_transport "$transport"
+	if [ "$transport" = mosh ] && ! command -v mosh >/dev/null 2>&1; then
+		transport=ssh
+	fi
+
+	tmux_on=$FLO_AGENT_TMUX
+	prefix=${FLO_AGENT_TMUX_PREFIX:-flo}
+	set -f
+	# shellcheck disable=SC2086
+	if [ "$tmux_on" = 1 ]; then
+		set -- tmux new -A -s "$prefix-$tool" $cmd
+	else
+		set -- $cmd
+	fi
+	set +f
+
+	dest=$(ssh_dest)
+	port=$FLO_AGENT_PORT
+	key=$(agent_key_file)
+	case $transport in
+	mosh)
+		command -v mosh >/dev/null 2>&1 || die "mosh not found"
+		boot=$(ssh_bootstrap)
+		exec mosh --ssh="$boot" -- "$dest" "$@"
+		;;
+	ssh)
+		command -v ssh >/dev/null 2>&1 || die "ssh not found"
+		if [ -f "$key" ]; then
+			exec ssh -t -p "$port" -i "$key" -o IdentitiesOnly=yes -- "$dest" "$@"
+		else
+			exec ssh -t -p "$port" -- "$dest" "$@"
+		fi
+		;;
+	esac
+}
+
+cmd_check() {
+	json=0
+	if [ "${1:-}" = --json ]; then
+		json=1
+	fi
+	load_config
+	command -v ssh >/dev/null 2>&1 || die "ssh not found"
+	dest=$(ssh_dest)
+	reachable=0
+	if err=$(run_ssh_check true 2>&1); then
+		reachable=1
+	else
+		err=${err:-}
+	fi
+	host_key=$(classify_host_key "$err" "$reachable")
+	error=
+	if [ "$host_key" = changed ]; then
+		reachable=0
+		error='host key changed'
+	elif [ "$reachable" != 1 ]; then
+		error='unreachable'
+	fi
+
+	status=0
+	[ "$reachable" = 1 ] || status=1
+	agents_json='{'
+	sep=
+	# shellcheck disable=SC2086
+	for tool in $FLO_AGENTS; do
+		cmd=$(remote_cmd_for "$tool")
+		name=$(first_word "$cmd")
+		state=missing
+		if [ "$reachable" = 1 ] && run_ssh_check command -v "$name" >/dev/null 2>&1; then
+			state=present
+		else
+			status=1
+		fi
+		agents_json="$agents_json$sep\"$tool\":\"$state\""
+		sep=,
+	done
+	agents_json="$agents_json}"
+
+	if [ "$json" = 1 ]; then
+		printf '{"reachable":%s,"error":"%s","agents":%s,"host_key":"%s"}\n' \
+			"$([ "$reachable" = 1 ] && printf true || printf false)" \
+			"$(json_escape "$error")" \
+			"$agents_json" \
+			"$(json_escape "$host_key")"
+		exit "$status"
+	fi
+
+	printf 'host: %s\n' "$dest"
+	if [ "$reachable" = 1 ]; then
+		printf 'reachable: yes\n'
+	else
+		printf 'reachable: no\n'
+	fi
+	if [ "$host_key" = changed ]; then
+		printf '%s\n' 'host key changed' >&2
+	fi
+	# shellcheck disable=SC2086
+	for tool in $FLO_AGENTS; do
+		cmd=$(remote_cmd_for "$tool")
+		name=$(first_word "$cmd")
+		if [ "$reachable" = 1 ] && path=$(run_ssh_check command -v "$name" 2>/dev/null); then
+			printf '%s: %s\n' "$tool" "$path"
+		else
+			printf '%s: missing\n' "$tool"
+		fi
+	done
+	exit "$status"
+}
+
+cmd_key_ensure() {
+	key=$(agent_key_file)
+	pub=$(agent_key_pub)
+	sshdir=$(posix_dirname "$key")
+	mkdir -p "$sshdir"
+	chmod 700 "$sshdir"
+	if [ ! -f "$key" ]; then
+		command -v ssh-keygen >/dev/null 2>&1 || die "ssh-keygen not found"
+		ssh-keygen -t ed25519 -N '' -C flo-agents -f "$key"
+	fi
+	chmod 600 "$key" 2>/dev/null || true
+	print_public_key || die "no public key"
+}
+
+cmd_key_show() {
+	print_public_key || exit 1
+}
+
+cmd_key_qr() {
+	[ $# -eq 1 ] || die "usage: flo-agents key qr <out.png>"
+	out=$1
+	line=$(print_public_key) || exit 1
+	command -v qrencode >/dev/null 2>&1 || exit 3
+	qrencode -o "$out" "$line"
+}
+
+cmd_key() {
+	sub=${1:-}
+	if [ $# -gt 0 ]; then
+		shift
+	fi
+	case $sub in
+	ensure) cmd_key_ensure ;;
+	show) cmd_key_show ;;
+	qr) cmd_key_qr "$@" ;;
+	*) die "usage: flo-agents key ensure|show|qr <out.png>" ;;
+	esac
+}
+
+data_home() {
+	if [ -n "${XDG_DATA_HOME:-}" ]; then
+		printf '%s\n' "$XDG_DATA_HOME"
+	else
+		printf '%s\n' "${HOME:?}/.local/share"
+	fi
+}
+
+crush_version_dir() {
+	printf '%s/flo-agents/crush/%s\n' "$(data_home)" "$CRUSH_VERSION"
+}
+
+crush_bin_path() {
+	printf '%s/crush\n' "$(crush_version_dir)"
+}
+
+crush_link_path() {
+	printf '%s\n' "${HOME:?}/.local/bin/crush-flo"
+}
+
+crush_config_dir() {
+	printf '%s/crush\n' "$(config_dir)"
+}
+
+secrets_file() {
+	printf '%s/secrets\n' "$(config_dir)"
+}
+
+crush_asset_for_arch() {
+	arch=$(uname -m)
+	case $arch in
+	armv7l|armv7|armhf) printf '%s\n' Linux_armv7 ;;
+	aarch64|arm64) printf '%s\n' Linux_arm64 ;;
+	x86_64|amd64) printf '%s\n' Linux_x86_64 ;;
+	*)
+		printf '%s\n' ''
+		return 1
+		;;
+	esac
+}
+
+crush_pinned_sha() {
+	asset=$1
+	case $asset in
+	Linux_armv7) printf '%s\n' "$CRUSH_SHA256_Linux_armv7" ;;
+	Linux_arm64) printf '%s\n' "$CRUSH_SHA256_Linux_arm64" ;;
+	Linux_x86_64) printf '%s\n' "$CRUSH_SHA256_Linux_x86_64" ;;
+	*) printf '%s\n' '' ;;
+	esac
+}
+
+crush_installed() {
+	bin=$(crush_bin_path)
+	[ -f "$bin" ] && [ -x "$bin" ]
+}
+
+secret_is_set() {
+	sf=$(secrets_file)
+	[ -f "$sf" ] || return 1
+	# shellcheck disable=SC1090
+	FLO_AGENT_API_KEY=
+	# shellcheck disable=SC1090
+	. "$sf"
+	[ -n "${FLO_AGENT_API_KEY:-}" ]
+}
+
+read_secret_key() {
+	sf=$(secrets_file)
+	[ -f "$sf" ] || return 1
+	FLO_AGENT_API_KEY=
+	# shellcheck disable=SC1090
+	. "$sf"
+	[ -n "${FLO_AGENT_API_KEY:-}" ] || return 1
+	printf '%s\n' "$FLO_AGENT_API_KEY"
+}
+
+crush_ready() {
+	crush_installed || return 1
+	[ -n "${FLO_AGENT_LOCAL_PROVIDER:-}" ] || return 1
+	[ -n "${FLO_AGENT_LOCAL_MODEL:-}" ] || return 1
+	case $FLO_AGENT_LOCAL_PROVIDER in
+	openai-compat|ollama|llamacpp)
+		[ -n "${FLO_AGENT_LOCAL_BASE_URL:-}" ] || return 1
+		;;
+	esac
+	case $FLO_AGENT_LOCAL_PROVIDER in
+	anthropic|openai|xai|openai-compat)
+		secret_is_set || return 1
+		;;
+	esac
+	return 0
+}
+
+file_sha256() {
+	command -v sha256sum >/dev/null 2>&1 || die "sha256sum not found"
+	sha256sum "$1" | awk '{print $1}'
+}
+
+cmd_secret_set() {
+	[ "${1:-}" = api_key ] || valid_fail "usage: flo-agents secret set api_key"
+	[ $# -eq 1 ] || valid_fail "usage: flo-agents secret set api_key (value from STDIN, not argv)"
+	IFS= read -r value || true
+	nl='
+'
+	[ -n "$value" ] || valid_fail "api_key is required on STDIN"
+	case $value in
+	*"'"*|*"$nl"*) valid_fail "api_key must not contain single quotes or newlines" ;;
+	esac
+	dir=$(config_dir)
+	mkdir -p "$dir"
+	chmod 700 "$dir"
+	umask 077
+	sf=$(secrets_file)
+	tmp=$sf.tmp.$$
+	{
+		printf '%s\n' '# flo-agents secrets. mode 600. Never commit or log.'
+		printf "FLO_AGENT_API_KEY='%s'\n" "$value"
+	} >"$tmp"
+	chmod 600 "$tmp"
+	mv "$tmp" "$sf"
+}
+
+cmd_secret_status() {
+	if ! secret_is_set; then
+		printf '%s\n' unset
+		return 0
+	fi
+	key=$(read_secret_key)
+	rest=$key
+	while [ ${#rest} -gt 4 ]; do
+		rest=${rest#?}
+	done
+	printf 'set %s\n' "$rest"
+}
+
+cmd_secret_unset() {
+	sf=$(secrets_file)
+	rm -f "$sf"
+}
+
+cmd_secret() {
+	sub=${1:-}
+	if [ $# -gt 0 ]; then
+		shift
+	fi
+	case $sub in
+	set) cmd_secret_set "$@" ;;
+	status) cmd_secret_status ;;
+	unset) cmd_secret_unset ;;
+	*) die "usage: flo-agents secret set|status|unset" ;;
+	esac
+}
+
+write_crush_json() {
+	dir=$(crush_config_dir)
+	mkdir -p "$dir"
+	chmod 700 "$(config_dir)" 2>/dev/null || true
+	umask 077
+	cfg=$dir/crush.json
+	provider=$FLO_AGENT_LOCAL_PROVIDER
+	model=$FLO_AGENT_LOCAL_MODEL
+	base=$FLO_AGENT_LOCAL_BASE_URL
+	esc_model=$(json_escape "$model")
+	esc_base=$(json_escape "$base")
+	api_field=
+	type_field=
+	base_field=
+	case $provider in
+	anthropic)
+		api_field='"api_key": "$ANTHROPIC_API_KEY"'
+		;;
+	openai)
+		api_field='"api_key": "$OPENAI_API_KEY"'
+		;;
+	xai)
+		api_field='"api_key": "$XAI_API_KEY"'
+		;;
+	openai-compat)
+		type_field='"type": "openai-compat"'
+		api_field='"api_key": "$OPENAI_API_KEY"'
+		base_field="\"base_url\": \"$esc_base\""
+		;;
+	ollama)
+		type_field='"type": "ollama"'
+		base_field="\"base_url\": \"$esc_base\""
+		if secret_is_set; then
+			api_field='"api_key": "$OPENAI_API_KEY"'
+		fi
+		;;
+	llamacpp)
+		type_field='"type": "llamacpp"'
+		base_field="\"base_url\": \"$esc_base\""
+		if secret_is_set; then
+			api_field='"api_key": "$OPENAI_API_KEY"'
+		fi
+		;;
+	esac
+	fields=
+	sep=
+	if [ -n "$type_field" ]; then
+		fields="$fields$sep$type_field"
+		sep=,
+	fi
+	if [ -n "$base_field" ]; then
+		fields="$fields$sep$base_field"
+		sep=,
+	fi
+	if [ -n "$api_field" ]; then
+		fields="$fields$sep$api_field"
+		sep=,
+	fi
+	printf '{\n  "providers": {\n    "%s": {%s}\n  },\n  "models": {\n    "large": {\n      "provider": "%s",\n      "model": "%s"\n    }\n  }\n}\n' \
+		"$provider" "$fields" "$provider" "$esc_model" >"$cfg"
+	chmod 600 "$cfg"
+}
+
+cmd_launch_crush() {
+	load_state
+	crush_installed || die "crush is not installed; run: flo-agents local install"
+	[ -n "$FLO_AGENT_LOCAL_PROVIDER" ] || die "local.provider is not set"
+	[ -n "$FLO_AGENT_LOCAL_MODEL" ] || die "local.model is not set"
+	case $FLO_AGENT_LOCAL_PROVIDER in
+	openai-compat|ollama|llamacpp)
+		[ -n "$FLO_AGENT_LOCAL_BASE_URL" ] || die "local.base_url is required for $FLO_AGENT_LOCAL_PROVIDER"
+		;;
+	esac
+	case $FLO_AGENT_LOCAL_PROVIDER in
+	anthropic|openai|xai|openai-compat)
+		secret_is_set || die "api_key is not set; run: flo-agents secret set api_key"
+		;;
+	esac
+	write_crush_json
+	bin=$(crush_bin_path)
+	gdir=$(crush_config_dir)
+	envname=
+	case $FLO_AGENT_LOCAL_PROVIDER in
+	anthropic) envname=ANTHROPIC_API_KEY ;;
+	openai|openai-compat) envname=OPENAI_API_KEY ;;
+	xai) envname=XAI_API_KEY ;;
+	ollama|llamacpp)
+		if secret_is_set; then
+			envname=OPENAI_API_KEY
+		fi
+		;;
+	esac
+	# Export the key only into the child. Do not print it, and never put
+	# it on a process argv (no `env KEY=value`).
+	CRUSH_GLOBAL_CONFIG=$gdir
+	export CRUSH_GLOBAL_CONFIG
+	if [ -n "$envname" ]; then
+		key=$(read_secret_key)
+		# envname is a hardcoded whitelist (ANTHROPIC/OPENAI/XAI_API_KEY).
+		export "$envname=$key"
+	fi
+	exec "$bin"
+}
+
+cmd_local_status() {
+	if crush_installed; then
+		printf '{"installed":true,"version":"%s","path":"%s"}\n' \
+			"$(json_escape "$CRUSH_VERSION")" \
+			"$(json_escape "$(crush_bin_path)")"
+	else
+		printf '%s\n' '{"installed":false,"version":"","path":""}'
+	fi
+}
+
+cmd_local_uninstall() {
+	verdir=$(crush_version_dir)
+	case $verdir in
+	*/flo-agents/crush/*)
+		if [ -d "$verdir" ]; then
+			rm -rf "$verdir"
+		fi
+		parent=$(posix_dirname "$verdir")
+		rmdir "$parent" 2>/dev/null || true
+		grand=$(posix_dirname "$parent")
+		rmdir "$grand" 2>/dev/null || true
+		;;
+	esac
+	link=$(crush_link_path)
+	if [ -L "$link" ] || [ -f "$link" ]; then
+		rm -f "$link"
+	fi
+	cdir=$(crush_config_dir)
+	rm -f "$cdir/crush.json" "$cdir/crushrc"
+	rmdir "$cdir" 2>/dev/null || true
+}
+
+cmd_local_install() {
+	asset=$(crush_asset_for_arch) || die "unsupported architecture '$(uname -m)' for local crush"
+	pinned=$(crush_pinned_sha "$asset")
+	[ -n "$pinned" ] || die "unsupported architecture '$(uname -m)' for local crush"
+	expected=${FLO_AGENTS_TEST_CRUSH_SHA256:-$pinned}
+	command -v curl >/dev/null 2>&1 || die "curl not found"
+	command -v tar >/dev/null 2>&1 || die "tar not found"
+	command -v sha256sum >/dev/null 2>&1 || die "sha256sum not found"
+	fname="crush_${CRUSH_VERSION}_${asset}.tar.gz"
+	base="https://github.com/charmbracelet/crush/releases/download/${CRUSH_RELEASE_TAG}"
+	workdir="${TMPDIR:-/tmp}/flo-agents-crush.$$"
+	mkdir -p "$workdir"
+	umask 077
+	tarball=$workdir/$fname
+	sums=$workdir/checksums.txt
+	if ! curl -fsSL -o "$tarball" "$base/$fname"; then
+		rm -rf "$workdir"
+		die "failed to download $fname"
+	fi
+	if ! curl -fsSL -o "$sums" "$base/checksums.txt"; then
+		rm -rf "$workdir"
+		die "failed to download checksums.txt"
+	fi
+	got=$(file_sha256 "$tarball")
+	if [ "$got" != "$expected" ]; then
+		rm -rf "$workdir"
+		die "checksum mismatch for $fname"
+	fi
+	if ! awk -v h="$expected" -v n="$fname" '
+		$1 == h && $2 == n { found = 1 }
+		END { exit found ? 0 : 1 }
+	' "$sums"; then
+		rm -rf "$workdir"
+		die "checksums.txt does not list the expected hash for $fname"
+	fi
+	verdir=$(crush_version_dir)
+	mkdir -p "$verdir"
+	if ! tar -xzf "$tarball" -C "$verdir"; then
+		rm -rf "$workdir" "$verdir"
+		die "failed to extract $fname"
+	fi
+	bin=
+	if [ -f "$verdir/crush" ]; then
+		bin=$verdir/crush
+	else
+		for cand in "$verdir"/*/crush; do
+			[ -f "$cand" ] || continue
+			bin=$cand
+			break
+		done
+	fi
+	if [ -z "$bin" ] || [ ! -f "$bin" ]; then
+		rm -rf "$workdir" "$verdir"
+		die "crush binary missing from archive"
+	fi
+	if [ "$bin" != "$verdir/crush" ]; then
+		mv "$bin" "$verdir/crush"
+		bin=$verdir/crush
+	fi
+	if [ ! -f "$verdir/LICENSE" ]; then
+		for lic in "$verdir"/*/LICENSE; do
+			[ -f "$lic" ] || continue
+			mv "$lic" "$verdir/LICENSE"
+			break
+		done
+	fi
+	chmod 755 "$verdir/crush"
+	link=$(crush_link_path)
+	mkdir -p "$(posix_dirname "$link")"
+	ln -sf "$verdir/crush" "$link"
+	rm -rf "$workdir"
+	printf '%s\n' "Charm Crush $CRUSH_RELEASE_TAG is FSL-1.1-MIT (personal use). See LICENSE next to the binary."
+}
+
+cmd_local() {
+	sub=${1:-}
+	if [ $# -gt 0 ]; then
+		shift
+	fi
+	case $sub in
+	install) cmd_local_install ;;
+	status) cmd_local_status ;;
+	uninstall) cmd_local_uninstall ;;
+	*) die "usage: flo-agents local install|status|uninstall" ;;
+	esac
+}
+
+print_help_claude() {
+	printf '%s\n' \
+		'Claude Code (64-bit host, 4 GB+ RAM):' \
+		'  curl -fsSL https://claude.ai/install.sh | bash' \
+		'  then run: claude   # logs in on the host' \
+		'  docs: https://code.claude.com/docs/en/setup'
+}
+
+print_help_codex() {
+	printf '%s\n' \
+		'Codex CLI (64-bit host):' \
+		'  curl -fsSL https://chatgpt.com/codex/install.sh | sh' \
+		'  then: codex login' \
+		'     or: codex login --device-auth' \
+		'  docs: https://github.com/openai/codex'
+}
+
+print_help_grok() {
+	printf '%s\n' \
+		'Grok Build (64-bit host):' \
+		'  curl -fsSL https://x.ai/cli/install.sh | bash' \
+		'  then first-run browser login, or set XAI_API_KEY from https://console.x.ai' \
+		'  docs: https://docs.x.ai/build/overview'
+}
+
+cmd_host_help() {
+	tool=${1:-}
+	[ $# -le 1 ] || die "usage: flo-agents host-help [tool]"
+	printf '%s\n' \
+		'Official host install and login commands. Documentation only.' \
+		'Run these on a 64-bit host you own; never on this tablet.' \
+		'Authentication is always your own job; flo-agents does not read credentials.' \
+		''
+	if [ -z "$tool" ]; then
+		print_help_claude
+		printf '\n'
+		print_help_codex
+		printf '\n'
+		print_help_grok
+		return
+	fi
+	case $tool in
+	claude) print_help_claude ;;
+	codex) print_help_codex ;;
+	grok) print_help_grok ;;
+	*) die "unknown agent: $tool" ;;
+	esac
+}
+
+cmd_install() {
+	arch=$(uname -m)
+	printf '%s\n' 'flo-agents never downloads, bundles or runs agent installers.' >&2
+	case $arch in
+	x86_64|aarch64)
+		printf '%s\n' \
+			"This machine is $arch, but install and login stay your job." \
+			'See: flo-agents host-help' >&2
+		;;
+	*)
+		printf '%s\n' \
+			"Refusing local install on architecture '$arch'." \
+			'Official builds exist only for x86_64 and aarch64.' \
+			'This tablet is ARMv7 with 2 GB RAM; those CLIs need a 64-bit host' \
+			'(Claude Code: 4 GB+ RAM). Use remote mode instead:' \
+			'  flo-agents setup' \
+			'  flo-agents launch' \
+			'Host install docs: flo-agents host-help' >&2
+		;;
+	esac
+	exit 1
+}
+
+cmd_uninstall() {
+	dir=$(config_dir)
+	rm -f "$dir/config"
+	for tmp in "$dir"/config.tmp.*; do
+		[ -e "$tmp" ] || continue
+		rm -f "$tmp"
+	done
+	rmdir "$dir" 2>/dev/null || true
+	wrap=$(wrapper_path)
+	if [ -L "$wrap" ]; then
+		self=$(script_path)
+		target=
+		if command -v readlink >/dev/null 2>&1; then
+			target=$(readlink -f "$wrap" 2>/dev/null) || target=
+		fi
+		if [ -n "$target" ] && [ "$target" = "$self" ]; then
+			rm -f "$wrap"
+		fi
+	fi
+}
+
+cmd=${1:-}
+if [ $# -gt 0 ]; then
+	shift
+fi
+case $cmd in
+setup) cmd_setup "$@" ;;
+config) cmd_config "$@" ;;
+key) cmd_key "$@" ;;
+secret) cmd_secret "$@" ;;
+local) cmd_local "$@" ;;
+list) cmd_list "$@" ;;
+launch) cmd_launch "$@" ;;
+check) cmd_check "$@" ;;
+host-help) cmd_host_help "$@" ;;
+uninstall) cmd_uninstall "$@" ;;
+install) cmd_install "$@" ;;
+-h|--help|help)
+	usage
+	exit 0
+	;;
+'')
+	usage
+	exit 1
+	;;
+*)
+	die "unknown command: $cmd"
+	;;
+esac
