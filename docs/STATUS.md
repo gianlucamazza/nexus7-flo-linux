@@ -665,9 +665,273 @@ Conclusione: entrambe tengono 60 fotogrammi al secondo nei gesti. flo-shell cost
 
 Aperti:
 - errore DSI alla variazione di luminosità (driver DSI v2);
-- indicatore di caricamento sovrapposto all'etichetta del PIN nel greeter;
-- conversione in Lua della configurazione di Hyprland prima della 0.57;
+- collaudo Lua sul tablet dopo il futuro aggiornamento di Hyprland (compatibilità già installata, vedi sotto);
 - audio WCD9310;
 - sensori;
-- segnalazioni a monte: Hyprland (indirizzi a 32 bit) e Quickshell;
+- segnalazione a monte Quickshell; Hyprland indirizzi a 32 bit segnalato in [#17017](https://github.com/hyprwm/Hyprland/issues/17017);
 - rimozione della chiave SSH diagnostica (su conferma).
+
+### Greeter: cursore invisibile (2026-11-16)
+
+L'indicatore sopra l'etichetta del PIN era il cursore del compositore,
+visibile già prima della comparsa del greeter. Impostato
+`cursor:invisible = true` nella configurazione Hyprland del solo greeter,
+nel progetto flo-shell e sul tablet. Configurazione precedente salvata in
+`/var/tmp/greeter-hyprland.conf.before-invisible-20261116-215038`.
+
+Verifiche: parsing della configurazione con Hyprland 0.54.3 riuscito,
+`cursor:invisible = 1` e nessun errore di configurazione dopo reload e
+riavvio completo. L'utente conferma cursore assente e tasti del PIN
+funzionanti dopo il riavvio. La sessione utente conserva la propria
+configurazione del cursore; chiave SSH diagnostica conservata.
+
+### Compatibilità Lua Hyprland e segnalazione armv7 (2026-11-16)
+
+flo-shell, commit `13b9907` (preceduto da `53c1ec1`): configurazioni Lua
+della sessione e del greeter, lanciatore condiviso `flo-hyprland` che sceglie
+il formato in base alla versione, DPMS e Indietro anche nel backend Lua.
+La 0.54.3 del tablet continua a usare i file classici; dalla 0.55 vengono
+scelti i file Lua. Una configurazione utente classica è mantenuta fino alla
+0.56; dalla 0.57 viene richiesta la conversione anziché ignorarla.
+
+Verifiche sul portatile: 6 test del lanciatore, parsing delle quattro
+configurazioni con Hyprland 0.56.2, installazione in staging, shell annidata
+Lua caricata, rotazione 0/90/180/270, dispatcher DPMS off/on con variazione
+di `dpmsStatus`. Revisione del codice completata senza problemi bloccanti.
+
+Costruito inizialmente il pacchetto r4 da `13b9907`; dopo il ripristino
+dell'accesso via Wi-Fi (`<tablet-wifi-address>`) ricostruito e installato
+`flo-shell-0.1_git20261116-r5.apk` dal commit `f9e0740`, che comprende anche
+le modifiche concorrenti a `Apps.qml` e `Sessiond.qml` già presenti sul tablet.
+Gli hash di entrambi i file sono stati verificati identici prima e dopo
+l'aggiornamento. Backup in
+`/var/tmp/flo-shell-before-lua-r5-20261116-220620`.
+
+Aggiornato `/etc/greetd/config.toml` a `command = "flo-hyprland greeter"`,
+conservando VT 7. Verifiche sul tablet: parsing di sessione e greeter
+riuscito con la 0.54.3; prova dei lanciatori come utenti `tablet` e `greetd`
+con un supervisore finto, entrambi scelgono il rispettivo file `.conf`;
+nessun errore nella configurazione del compositore attivo; greetd attivo e
+shell rispondente via IPC, sessiond collegato. File Lua e lanciatore
+coincidono con quelli del progetto. La configurazione PAM locale è stata
+conservata da apk (nuova copia in `flo-shell.apk-new`). Lua sul dispositivo
+resta da collaudare dopo l'aggiornamento del compositore.
+
+Riavvio completo richiesto dall'utente ed eseguito via Wi-Fi alle 22:08:
+nuovo boot ID `a57b21ff-714c-4a1e-9077-3e83b07e0784`. Greeter avviato
+dal nuovo lanciatore, configurazione senza errori, `cursor:invisible = 1`,
+pannello 1200×1920 a 60 Hz, scala 2. Screenshot acquisito con grim e
+ispezionato: PIN e tastierino correttamente disposti. L'utente conferma
+accesso riuscito e touch funzionante. Sessione `tablet` avviata alle 22:09,
+shell rispondente via IPC, flo-sessiond servizio/socket attivi e collegati,
+Wi-Fi su `<tablet-wifi-address>`, zero unità systemd fallite sia di sistema sia
+dell'utente `tablet`. Nessun panic, Oops o guasto GPU rilevato nel nuovo
+avvio. Restano i messaggi driver noti e gli errori audio nel contesto
+greeter; non sono risolti da questo aggiornamento. Screenshot della
+sessione salvato e ispezionato in
+`~/nexus7-recovery-20261114/session-after-lua-reboot.png`; greeter in
+`~/nexus7-recovery-20261114/greeter-after-lua-reboot.png`.
+Provati anche apertura/chiusura del launcher e avvio di Impostazioni tramite
+la shell: una sola finestra sia nello stato della shell sia in Hyprland,
+`appScopes = true` e scope di Impostazioni riconosciuto in primo piano.
+Screenshot dell'app acquisito e ispezionato in
+`~/nexus7-recovery-20261114/settings-after-reboot.png`. L'app di prova
+è stata chiusa a fine controllo.
+
+Con autorizzazione dell'utente pubblicata la segnalazione
+[Hyprland #17017](https://github.com/hyprwm/Hyprland/issues/17017), con
+comportamento osservato su 0.54.3, analisi dei cast presenti anche su main,
+proposta di passaggio attraverso `uintptr_t` e limiti della verifica.
+Testo locale in `docs/upstream/hyprland-armv7-toplevel-address.md`.
+
+Audio/sensori: ultima lettura sul tablet prima della disconnessione conferma
+nessuna scheda ALSA e nessun dispositivo SLIMbus/IIO elencato. Non applicate
+le bozze hardware: audio richiede abilitazione SLIMbus e DT, più i percorsi
+RX3/RX4 e LINEOUT1/3 mancanti per gli altoparlanti; i sensori richiedono
+prima l'identificazione del percorso firmware/bus. Il problema DSI resta
+aperto; nessuna modifica al kernel in questa sessione.
+
+### UI touch adattiva completata (2026-11-16)
+
+Installato via Wi-Fi `flo-shell-0.1_git20261116-r8.apk`, sorgente
+`a713784` (UI `459f521`, correzioni `68d2df5`, `4fa32d4`, `a713784`).
+Backup prima dell'aggiornamento in
+`/var/tmp/flo-shell-before-ui-r6-20261116-223645`; pacchetti intermedi r6/r7
+conservati nell'area di lavoro. Su Quickshell 0.3.2 il primo aggiornamento
+ha richiesto un riavvio della sola shell per registrare il nuovo singleton
+UiPreferences; dopo il riavvio non restano errori QML.
+
+Implementati home stabile con accessi rapidi, Tutte le app e Controlli
+rapidi; barra visibile Indietro/Home/App aperte/tastiera; launcher con
+etichette su due righe e colonne adattive; feedback di avvio limitato nel
+tempo; testo 100/125/150% e animazioni ridotte salvati per utente; focus,
+azioni da tastiera e metadati di accessibilità; slider con alternativa −/+;
+controlli rapidi scorrevoli a spazio ridotto. Scala del display 2× invariata.
+La superficie input della barra superiore ora coincide con lo spazio
+riservato, evitando di coprire i controlli delle app sottostanti.
+
+Home mantiene le app e annulla l'intento di primo piano: le finestre che
+arrivano in ritardo non la nascondono. Gli accessi rapidi riusano le finestre
+già presenti e gli scope ancora in avvio senza finestra, scongelandoli;
+sessiond riceve correttamente il ritorno a Home. La lettura dello stato dei
+monitor dopo una rotazione avviene una sola volta dopo il commit dell'output,
+evitando l'indicatore bloccato sul vecchio orientamento.
+
+Verifiche completate:
+- `make check`, 6 test del lanciatore e parser delle quattro configurazioni;
+- `dev/test-ui.py` in Hyprland annidato: Home idempotente, pannelli/Indietro,
+  testo ingrandito, 4 orientamenti, nuove finestre senza rubare Home,
+  conservazione/riattivazione/riuso di app reali;
+- screenshot ispezionati di home, launcher, controlli rapidi e alimentazione
+  a testo normale/150%, e greeter PIN/password in orizzontale;
+- sul tablet: Home durante l'avvio di Impostazioni, congelamento effettivo
+  dello scope `app-org.gnome.Settings-2a2b5be2.scope`, successivo scongelamento
+  e riuso per due volte senza duplicare scope o finestre; browser già aperto
+  conservato e app di prova chiusa;
+- touch tramite un unico dispositivo uinput: Home, panoramica, Indietro,
+  apertura tastiera, Home che la chiude, apertura/chiusura controlli rapidi;
+- testo al 125% conservato dopo il riavvio della shell, poi ripristinato al
+  100%; ritornati in verticale e riattivato il normale blocco per inattività;
+- stato finale: r8 installato, zero unità fallite, nessun errore di
+  configurazione Hyprland né errore QML della shell corrente; un campione
+  della home ferma misura 1 tick CPU in 10 s (HZ=100).
+
+Screenshot finali locali in `~/nexus7-recovery-20261114/ui-r8-home-final.png`
+e `ui-qs-landscape-large.png`. Restano distinti il collaudo completo con un
+lettore di schermo, l'adattamento interno delle app GTK esterne e i problemi
+driver già aperti. Chiave SSH diagnostica conservata.
+
+### Ricerca accelerometro / DSPS (2026-11-16, implementazione parziale)
+
+Integrato `8b1b2c7`: audit read-only `scripts/flo-sensor-audit.py`, 14 test
+unittest passati e revisione indipendente completata. Eseguito due volte sul
+tablet via Wi-Fi; firmware e risultato coincidono con l'evidenza salvata.
+Fonti originali fissate a commit AOSP e analisi in `docs/hw/SENSORS.md`.
+La bozza 0007 è ora esplicitamente superata, non da applicare.
+
+Confermato DSPS ARM7, PAS ID 2, firmware distribuito su TCM/PIPE/DDR.
+La finestra DDR `0x8fe00000–0x8ff00000` ricade attualmente nella RAM Linux:
+non avviare il firmware senza prima riservarla e implementare il caricatore
+corretto. Recuperato in sola lettura `persist:/sensors/sns.reg`, preservato
+localmente; formato e protocollo SENSOR ancora da ricostruire.
+
+Accelerometro e autorotazione **non implementati**: mancano driver remoteproc,
+trasporto/registro e interfaccia IIO validati. Nessun kernel o parametro
+hardware modificato, nessuna calibrazione riscritta. Verifica finale: zero
+unità systemd fallite, RIVA in esecuzione, nessun dispositivo IIO, stesso r23.
+Chiave diagnostica conservata.
+
+### Luminosità: permessi corretti, glitch DSI in indagine (2026-11-16)
+
+Installato flo-shell r9, sorgente `b4c6cce`. Riprodotto il problema segnalato:
+brightnessctl non setuid, utente tablet senza gruppo video, scrittura negata;
+la UI restava sul valore ottimistico. La sessione c3 è attiva su seat0 e
+logind SetBrightness funziona. La shell ora preferisce logind, rilegge sysfs
+quando la coda delle scritture si svuota e dopo gli errori, preserva l'ultima
+richiesta durante le scritture precedenti. Test QML reale con file temporaneo:
+RED sul rollback mancato, poi GREEN; `make check` e revisione indipendente
+passati. Metodo live confermato logind; valori richiesti via IPC arrivano a
+sysfs. Prove automatiche sospese quando l'utente ha iniziato a usare lo slider.
+Backup `/var/tmp/flo-shell-before-brightness-r9-20261116`.
+
+L'utente segnala sfarfallii/righe sull'intero schermo durante il trascinamento.
+Errore DSI status=5 ancora presente; non dichiarato risolto. Nuova evidenza
+nel driver originale JDI: `bl_value[2] = {0x51, livello}` con DCS_WRITE1;
+il driver attuale usa il helper a 16 bit (tre byte, DCS long write), e legge
+due byte. In preparazione test KUnit dei callback reali per correggere il
+formato a 8 bit e il ripristino dei flag anche dopo errori. Kernel ancora r23.
+
+DSPS WIP salvato sul ramo kernel `flo/dsps-r24`, commit `e14857e3e`:
+compilato ma non installato, quattro problemi di revisione da correggere.
+La correzione display si sviluppa separatamente da r23 sul ramo
+`flo/dsi-brightness-r24`. Nessuna parte del WIP DSPS va inclusa nel kernel
+della prova display. Config QCOM_DSPS rimossa dal pacchetto per questa prova.
+
+### Blocco eMMC durante backup prima di r26 (2026-11-17)
+
+r24 (`51ad273c2`, #25): boot/accesso riusciti, DCS 8-bit elimina gli errori
+FIFO campionati ma utente conferma ancora glitch; VIDEO_DONE scade 70 ms.
+r25 (`ff85fc434`, #26): attesa prima di CMD_MODE_EN; VIDEO_DONE non arriva
+comunque, scritture rifiutate -110 e systemd-backlight fallisce. r26
+(`af242cea4`) combina sequenza corretta e vblank MDP/DRM: il segnale nativo
+è verificato con ioctl (seq 2666–2668, attese 13–17 ms). Pacchetto costruito
+`7.2_p20261117002551-r0`, SHA256
+`2f70b12680c405f19555e9d416013183cb0469c9eddeaf50e78532349e4dbccd`.
+
+L'installazione r26 si è bloccata PRIMA di apk add, durante cp del backup
+/lib/apk/db. Coda MMC ferma (statistiche disco non avanzano, 11 richieste
+in volo), sistema ancora raggiungibile in SSH/Wi-Fi. SysRq-w catturato sul
+computer: dispatch mmc_blk_rw_wait; timeout blk_mq bloccato in synchronize_srcu;
+journal ext4 in attesa I/O, PID1 bloccato su page fault. Dump in
+`~/nexus7-recovery-20261114/dsi-brightness-20261116/io-hang-sysrq.log`.
+Installer sospeso/cancellato, r26 NON installato; boot resta r25 e backup
+r23/r24 precedenti sono conservati. Richiesta conferma per reset forzato,
+perché il filesystem non riesce a sincronizzare. Nessun reset forzato eseguito.
+
+Ulteriore evidenza da verificare: mmc0 ios richiede 52 MHz ma actual_clock
+è 64 MHz, pur essendo in MMC high-speed. Vendor sdc1_sup_clk_rates usa
+400k/24M/48M/96M. Non dichiarata causa del blocco senza ulteriori prove.
+
+Verifica successiva: parent installer PID1149 terminato; il solo cp PID1153
+resta D, adottato da PID1, con SIGKILL richiesto. Nessun passo di installazione
+può proseguire. Confermati contatori eMMC invariati e clock 52 richiesto/64 MHz
+reale. Analisi sorgente: clk_rcg_ops arrotonda in alto; anche floor_ops ha
+ancora determine_rate in alto. Eventuale correzione deve coprire entrambi i
+callback e preservare il minimo 144 kHz al probe MMCI. Nessuna modifica clock
+live né nuovo kernel installato. Dettagli in docs/hw/DSI-BRIGHTNESS.md.
+
+### Recupero e avvio r27 — 2026-11-17 mattina
+
+Utente riavviato manualmente, normale avvio fallito, poi TWRP via USB.
+last_kmsg salvato: r25 #26, BKOPS/EXT_CSD sincrono prende il descriptor DMA
+pre-mappato della prossima richiesta (WARN cookie0), poi errore DMA e BUG
+vunmap nel rilascio BAM da hardIRQ. Corretto il furto con guard sul cookie;
+KUnit sul callback reale RED (1/3 fallisce), GREEN3/3, review indipendente.
+Commit kernel45f75744c, ramo flo/mmci-bkops-r27, mantiene display r26, no DSPS.
+Restano separati i difetti di cleanup DMA su errore e clock52→64MHz.
+
+Recovery: backup metadati e2image QCOW2 + file p22 + DB apk sul computer;
+e2fsck1.47.4 journal replay root e boot, entrambi exit0. Copia kernel p22
+integra contro APK r25; copia inner /boot con1KiB azzerato, preservata e poi
+sostituita. Audit /usr /opt: modifiche contenuto solo7indici moduli generati;
+molti record x sotto vecchia recovery non interpretati come danni contenuto.
+
+Installato da TWRP r27 APK7.2_p20261117101447-r0, SHA256
+9e409f4cad9faf6f50006c530fac896a88bd130636be2f1672a071fde5960477.
+Rigenerati depmod/initramfs, boot e p22 identici, smontati puliti prima reboot.
+Avviato #28; greetd attivo, nessuna unità fallita, SSH USB e Wi-Fi funzionanti.
+Utente conferma greeter e login. Prova4MiB random scrittura/fsync/evizione/
+rilettura checksum passa; nessun errore MMC/DSI rilevante campionato, inflight0.
+Log journal precedente troncato dopo reset è conservato, nuovo journal attivo.
+
+Utente dopo login: glitch ancora durante slider, ora **solo pannello notifiche/
+controlli**, non intero schermo. Non dichiarare risolto il difetto visivo.
+Schermata home catturata; pannello da acquisire durante riproduzione coordinata,
+perché lo schermo si è bloccato/spento per inattività durante l'indagine.
+Chiave SSH conservata. Evidenze private recovery-20261117 sul computer.
+
+
+### Lock screen e piano complessivo — 2026-11-17
+
+Utente segnala failsafe lock-client-died. Quickshell927 era ancora vivo,
+nessun core nuovo e RAM disponibile; Sessionlocked=true. Riavviata soltanto
+la shell con marker conservato: PIN ricomparso, screenshot verificata.
+Corretto un difetto di ordinamento: DPMSoff aspettava ora la conferma
+WlSessionLock.secure anziché seguire subito la richiesta di lock.
+Codice3705998 (flo-shell fix/lock-before-dpms), documentazione c97fc8b.
+Test Session.qml reale RED sullo spegnimento anticipato, GREEN su ack/wake;
+makecheck e review indipendente passati. Installato0.1_git20261117-r0,
+APK SHA256 d11f132bde914a000391a0b8d6ea21672d656cc0007c561ec69ce5cbc58b99e8.
+PAMlocale preservato da apk. Prova nativa da sbloccato: locked=true,
+lockSecure=true prima/durante blank; dopo wake resta locked=true secure=true,
+PIN visibile in screenshot. Utente conferma accesso e touch funzionanti.
+Restano da collaudare cicli ripetuti e condizioni di riavvio/errore; la causa
+ultima del precedente failsafe non è provata dalla sola correzione del race.
+
+Glitch luminosità ancora confermato dall'utente: sembra spostare la grafica
+delle notifiche durante il drag; non localizzato né dichiarato risolto.
+Su richiesta esplicita preparato piano complessivo, senza ulteriori modifiche
+al dispositivo: docs/superpowers/plans/2026-11-17-nexus7-resolution.md,
+requisiti in docs/superpowers/specs/2026-11-17-nexus7-resolution-design.md.
+Include DMA/errorpath/clock, lock/greeter, diagnosi e correzione glitch,
+DSPS/IIO/autorotazione, audio, Hyprland/portali/crash e audit hardware/workaround.
