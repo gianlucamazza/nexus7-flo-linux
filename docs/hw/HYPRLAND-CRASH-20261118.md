@@ -6,33 +6,59 @@ from 16 November at 16:47 CET. The process was `Hyprland 0.54.3`, running
 
 The crash report says Hyprland originally received **signal 11**. The
 systemd-coredump record for the same PID is **SIGABRT**; it captured the
-crash handler's termination, so SIGABRT should not be presented as the
-original fault. This Alpine armv7 build has no `execinfo.h` backtrace in
-the Hyprland report. GDB on the core has only two unresolved frames in the
-crashing thread; the available package has no matching public `-dbg`
-subpackage. No faulting function is established.
+crash handler's termination, so SIGABRT is not the original fault. This
+Alpine armv7 build has no `execinfo.h` backtrace in the Hyprland report.
+Loading the tablet's exact musl loader and Hyprland executable into GDB
+allowed unwinding across the crash handler's signal frame. The original
+faulting stack is:
+
+```
+CWLSurfaceResource::client()              # original SIGSEGV, r0 = 0
+CSeatManager::sendTouchDown(...)
+CInputManager::onTouchDown(...)
+```
+
+On ARM, `r0` carries the `this` pointer for this member call. Here it is
+zero. The exact [v0.54.3 source][v0543-seat] dereferences `surf` at
+`auto client = surf->client()` without checking it. Its [touch-down
+caller][v0543-touch] passes `m_touchData.touchFocusSurface.lock()` even
+when a window or layer focus was selected but the weak surface reference
+has expired or is empty. This establishes a null surface dereference in
+the touch delivery path. It does not establish why the surface became
+empty in this particular event. As of upstream commit
+`4d9a4720d24da84b540fdf8a6aa917abe564d0a2` (17 November 2026),
+the same unchecked call remains in [SeatManager][upstream-seat] and
+[Touch.cpp][upstream-touch].
 
 At 16:46:51, `systemd-logind` logged a short power-key press. The Hyprland
 report's log tail includes repeated removal/readdition of the test-only
 `nexus7-uibench-touch` input device, a libseat `Device not taken` error for
 `/dev/input/event3`, DSI-1 disable and enable modesets, and repeated CTM
 commit failures because the DRM CRTC does not advertise CTM. The process
-crashed at 16:47:02. These events are correlated in time; none is proven
-to be the faulting operation. In particular, CTM errors are present around
-normal modesets and do not by themselves identify the SIGSEGV.
+crashed at 16:47:02. These events are correlated in time; the recovered
+stack identifies touch delivery as the faulting operation, but does not
+prove whether hotplug, modesetting, or another focus transition made the
+surface reference empty. CTM errors are present around normal modesets
+and do not by themselves identify the SIGSEGV.
 
 The current r29 session has since passed ten native lock/wake cycles and
 user-confirmed login/touch. Those tests reduce the likelihood of an
 unconditional power-key failure, but they did not repeat the same virtual
 touch hotplug load or establish the cause of the historical crash.
 
-Next native test, when power and recovery are stable: keep the virtual
-touch device absent and exercise power-key/DPMS cycles; then test hotplug
-without DPMS, and only then their combination. Capture Hyprland/aquamarine
-logs and kernel DRM/input events with monotonic timestamps. If a crash
-recurs, obtain a symbolized build or a minimal reproduction before
-claiming a compositor, input, or DRM fix. Do not conflate this event with
-the separate 32-bit toplevel-address defect or GTK4 Settings crash.
+Next: design a compositor fix that rejects an absent surface before
+touch-down delivery and leaves touch focus/lock state consistent. Exercise
+an expired surface with a still-present window/layer focus in a focused
+test, then build/test the exact package and repeat native hotplug and
+power-key/DPMS cycles when charging and recovery are stable. Capture
+Hyprland/aquamarine logs and kernel DRM/input events with monotonic
+timestamps. Do not conflate this event with the separate 32-bit
+toplevel-address defect or GTK4 Settings crash.
 
 The core was copied temporarily to a private host directory for analysis
 and deleted. This document contains no core memory or private firmware.
+
+[v0543-seat]: https://github.com/hyprwm/Hyprland/blob/v0.54.3/src/managers/SeatManager.cpp#L375-L381
+[v0543-touch]: https://github.com/hyprwm/Hyprland/blob/v0.54.3/src/managers/input/Touch.cpp#L68-L110
+[upstream-seat]: https://github.com/hyprwm/Hyprland/blob/4d9a4720d24da84b540fdf8a6aa917abe564d0a2/src/managers/SeatManager.cpp#L508-L514
+[upstream-touch]: https://github.com/hyprwm/Hyprland/blob/4d9a4720d24da84b540fdf8a6aa917abe564d0a2/src/managers/input/Touch.cpp#L149-L152
