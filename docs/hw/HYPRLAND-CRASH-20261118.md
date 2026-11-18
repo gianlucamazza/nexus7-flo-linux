@@ -64,10 +64,23 @@ An entry guard before any listener/focus/count mutation made the test
 pass, and the complete available GTest suite passed 2/2 after clearing
 stale coverage data. Source branch `flo/touch-null` is at `58a41a8` in
 `build/hyprland-touch-src`; pmaports branch `flo/hyprland-touch` is at
-`0c060a8` in `build/pmaports-hyprland-touch`. The armv7 package build is
-in progress. This is a host regression and compile result, not a native
-touch/hotplug validation. The separate question of why the focus surface
-became null in the historical sequence remains open.
+`662ab64` in `build/pmaports-hyprland-touch`. The first armv7 build
+compiled the executable but failed when `ninja install` recompiled inside
+fakeroot, which crossdirect rejects. The package now uses the equivalent
+`cmake --install` step; this was checked directly in the build chroot and
+the full armv7 build finished successfully. The signed local APK
+`hyprland-0.54.3-r1.apk` has SHA-256
+`d0b1c50503227e0d2b259623c5db53c59da87a4a4c980733b4240f682947baaf`.
+`apk.static verify` reports `OK`; its ELF32 ARM executable has SHA-256
+`2efcef531e2f89fd9c8aec3dbea9f66292d719babb69c9d92cc862abf8c74710`.
+The build log confirms application of the source patch and compilation
+of `SeatManager.cpp`. The APK was copied over Wi-Fi, hash checked and
+simulated on the tablet, then installed as `0.54.3-r1`. The installed
+binary hash matches the extracted APK binary. The existing Hyprland
+process still maps its previous, now deleted executable; a controlled
+greeter restart and native touch/hotplug test remain. The separate
+question of why the focus surface became null in the historical sequence
+also remains open.
 
 Rollback prepared before native installation: the official Alpine edge
 armv7 `hyprland-0.54.3-r0.apk` is stored privately at
