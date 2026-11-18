@@ -1,0 +1,27 @@
+# Maintainer: Gianluca Mazza <info@gianlucamazza.it>
+pkgname=flo-agents
+pkgver=0.1_git20261118
+pkgrel=0
+_commit=709825b
+pkgdesc="Optional agent session CLI for Nexus 7 flo"
+url="https://github.com/gianlucamazza/nexus7-flo-linux"
+arch="noarch"
+license="MIT"
+depends="openssh-client-default curl"
+checkdepends="python3"
+source="flo-agents-$_commit.tar.gz"
+builddir="$srcdir/flo-agents-$_commit"
+
+check() {
+	python3 tests/test_flo_agents.py
+}
+
+package() {
+	install -Dm755 scripts/flo-agents "$pkgdir/usr/bin/flo-agents"
+	install -Dm644 docs/flo-agents.md "$pkgdir/usr/share/doc/flo-agents/flo-agents.md"
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/flo-agents/LICENSE"
+}
+
+sha512sums="
+62fdbe7aa0119bdf54fe6d0e7656119be30b15d3ba72426bd2ef1762ca07894ea454a93832d081ba501746ad624dfd5ec44132085f819e22aa4b7196e5e316f5  flo-agents-709825b.tar.gz
+"

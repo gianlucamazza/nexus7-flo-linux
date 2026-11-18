@@ -1,0 +1,26 @@
+# Maintainer: Gianluca Mazza <info@gianlucamazza.it>
+# Local package for the Nexus 7 2013 (flo); source is a git archive of
+# the published feat/agent-pr-integration branch at d9eb5cd.
+pkgname=flo-shell
+pkgver=0.1_git20261118
+pkgrel=1
+_commit=d9eb5cd
+pkgdesc="GPU-drawn Quickshell touch shell for the Nexus 7 2013"
+url="https://localhost/flo-shell"
+arch="noarch"
+license="MIT"
+depends="quickshell hyprland greetd wvkbd brightnessctl xdg-desktop-portal-hyprland xdg-desktop-portal-gtk hyprpolkitagent gnome-settings-daemon"
+source="flo-shell-$_commit.tar.gz"
+builddir="$srcdir/flo-shell-$_commit"
+options="!check"
+
+build() {
+	make PREFIX=/usr
+}
+
+package() {
+	make install DESTDIR="$pkgdir" PREFIX=/usr
+}
+sha512sums="
+7d59ce3bb44d7db6990e32c8842a6235e9b8b968a3730a58321fbdb0cf1daf9eddc426d1eaaa4a32eeb255b8c7dcfcc3a66537ea601e16aa3b253f65f2354744  flo-shell-d9eb5cd.tar.gz
+"
