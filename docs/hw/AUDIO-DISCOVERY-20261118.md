@@ -12,8 +12,9 @@ machine driver usa LINEOUT2/4, mentre le fonti flo indicano LINEOUT1/3.
 
 ## Identificazione della revisione
 
-La board Android registra dispositivi tabla con product code `0x10`
-(1.x) e `0x60` (2.x). Questo descrive i modelli supportati dal vendor,
+La [board flo Android](https://github.com/omnirom/android_kernel_asus_flo/blob/android-7.1/arch/arm/mach-msm/asustek/flo/board-flo.c)
+registra due `slim_boardinfo`, tabla con product code `0x10` (1.x) e
+tabla20 con `0x60` (2.x). Questo descrive i modelli supportati dal vendor,
 non prova quale revisione sia montata sul nostro tablet. Nel core SLIMbus
 Linux, `slim_device_report_present()` crea un `slim_device` dalla
 enumeration address ricevuta; `slim_add_device()` dà al dispositivo un
