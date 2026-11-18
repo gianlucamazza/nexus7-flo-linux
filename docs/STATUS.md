@@ -939,3 +939,16 @@ DSPS/IIO/autorotazione, audio, Hyprland/portali/crash e audit hardware/workaroun
 Per le verifiche successive del 18 novembre e i problemi ancora aperti,
 vedi [l'analisi corrente](hw/ANALYSIS-20261118.md) e
 [il registro storico](hw/ISSUES-20261117.md).
+
+### Suspend e passaggio tra app — 2026-11-18
+
+La panoramica vede due finestre reali, Impostazioni ed Epiphany. La selezione
+di entrambe aggiorna la finestra attiva di Hyprland e l'unità in primo piano
+di flo-sessiond; l'utente conferma che entrambe tornano visibili e rispondono
+al touch. `flo-shell` include una prova annidata ripetibile per il percorso.
+
+Suspend non è ancora funzionante: il kernel espone solo `s2idle` e la prova
+`pm_test=devices` fallisce due volte su `4300000.gpu` con `-EBUSY`, anche a
+schermo spento. La prova freezer passa. Il dettaglio e la successiva
+diagnostica del driver A3xx sono in [SUSPEND-20261118.md](hw/SUSPEND-20261118.md).
+Nessun ciclo completo di suspend è stato tentato dopo questo fallimento.
