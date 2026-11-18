@@ -1,8 +1,11 @@
 # Flo accelerometer: implementation status and verified bring-up inputs
 
-The accelerometer is **not functional** on the running r23 kernel. The completed
-implementation here is a read-only firmware/memory audit, not a sensor driver.
-No kernel, regulator, firmware, calibration or tablet configuration was changed.
+The accelerometer is **not functional** on the running r29 kernel. This
+document began as a read-only firmware/memory audit. A separate host branch,
+`flo/dsps-lifecycle` (`4e89c8ee3`), now contains an ARM7 remoteproc loader,
+SMD edge, and a reserved 1 MiB DDR region. Its ARMv7 package `7.2-r32` was
+built and staged, but has not been installed or booted. No IIO sensor exists
+on the tablet. The audit below did not change firmware or calibration.
 
 ## Reproduce the audit
 
@@ -50,10 +53,11 @@ Vendor kernel sources below are pinned to AOSP commit
 | [irqs-8064.h](https://android.googlesource.com/kernel/msm/+/75977811169d779c039da38e63a1cac4e0cd1693/arch/arm/mach-msm/include/mach/irqs-8064.h) | DSPS SMD GIC SPI **138**, SMSM SPI **137**, watchdog SPI **213**. |
 | [Kconfig](https://android.googlesource.com/kernel/msm/+/75977811169d779c039da38e63a1cac4e0cd1693/arch/arm/mach-msm/Kconfig) | Describes DSPS as **ARM7**. Live firmware confirms ELF32 LE, `e_machine = 40` (ARM). |
 
-The current fork already describes DSPS SMSM host 4 and IPC at
-`sps_sic_non_secure + 0x4094`, bit 0. This does not instantiate DSPS remoteproc
-or its SMD edge. **Do not confuse SMSM IPC with SMD IPC**; the latter must be
-verified from matching interrupt configuration before adding the edge.
+The r29 fork describes DSPS SMSM host 4 and IPC at
+`sps_sic_non_secure + 0x4094`, bit 0. The isolated r32 branch also describes
+the SMD edge with GIC SPI 138 and IPC at `sps_sic_non_secure + 0x4080`, bit 0.
+**Do not confuse SMSM IPC with SMD IPC**. The SMD edge still needs a native
+boot test; source and DT inspection cannot prove that an interrupt arrives.
 
 ## Firmware memory map
 
@@ -92,6 +96,41 @@ The firmware contains `SENSOR`, `sns_smr_dsps.c`, SMD/SMEM support and
 framing, service IDs or compatibility with modern SMGR drivers. Firmware boot
 and discovery of a channel will not by themselves establish working IIO.
 
+## SENSOR transport and sample format: source reconstruction
+
+The pinned flo [SMD packet driver](https://android.googlesource.com/kernel/msm/+/75977811169d779c039da38e63a1cac4e0cd1693/arch/arm/mach-msm/smd_pkt.c)
+maps `/dev/smd_sns_dsps` to channel `SENSOR` on `SMD_APPS_DSPS` edge 3.
+This independently matches the `SENSOR` string in the firmware. It is the
+SMD packet transport, not a QRTR service name. The r32 DT describes edge 3,
+but channel creation and packet exchange have not been observed on flo.
+
+An open Qualcomm sensor daemon source snapshot at
+[`e0666c3`](https://github.com/sethsong90/vendor_qcom/tree/e0666c398903d38e72aeda7042ec2836cd3dba68/sensors/dsps)
+shows the candidate application protocol. Its
+[`sns_smr_la.c`](https://github.com/sethsong90/vendor_qcom/blob/e0666c398903d38e72aeda7042ec2836cd3dba68/sensors/dsps/sensordaemon/smr/src/sns_smr_la.c)
+opens `/dev/smd_sns_dsps` except on MSM8974, reads one SMD packet into an
+SMR message, and encodes outgoing bodies with `qmi_idl_message_encode()`.
+`SMR_ENCODE_ON` is defined in its
+[`sns_smr_priv.h`](https://github.com/sethsong90/vendor_qcom/blob/e0666c398903d38e72aeda7042ec2836cd3dba68/sensors/dsps/sensordaemon/common/smr/src/sns_smr_priv.h).
+The packed [`sns_smr_header_s`](https://github.com/sethsong90/vendor_qcom/blob/e0666c398903d38e72aeda7042ec2836cd3dba68/sensors/dsps/sensordaemon/common/smr/inc/sns_smr_util.h)
+is 12 bytes: destination, source, priority, transaction, external-client,
+message type, alignment and service are eight one-byte fields, followed by
+little-endian 16-bit message ID and body length. The body is a QMI IDL
+encoded service message, not a second generic QRTR packet header. This
+source is close in generation but **not the exact flo build**; packet layout
+must be checked against a live capture before Linux sends requests.
+
+In the same snapshot, [`sns_common_v01.h`](https://github.com/sethsong90/vendor_qcom/blob/e0666c398903d38e72aeda7042ec2836cd3dba68/sensors/dsps/api/sns_common_v01.h)
+assigns SMGR service 0. Its
+[`sns_smgr_api_v01.h`](https://github.com/sethsong90/vendor_qcom/blob/e0666c398903d38e72aeda7042ec2836cd3dba68/sensors/dsps/api/sns_smgr_api_v01.h)
+assigns accelerometer sensor ID 0, version request/response message 1,
+periodic report request/response message 2 and indication message 3.
+Accelerometer primary samples have three signed Q16 fields in m/s², X/Y/Z
+order; the report also carries timestamps, flags and calibration selection.
+These are protocol candidates, **not yet measurements from flo**. In
+particular, an IIO scale or mount matrix cannot be taken from the header
+without validating the firmware response and six physical poses.
+
 `persist` was inspected using **debugfs without `-w`**, not mounted or replayed.
 Only the sensor registry payload was copied for analysis:
 
@@ -111,13 +150,15 @@ infer calibration or sensor identity.
 
 ## Remaining implementation gates
 
-1. Verify SMD IPC and the actual SENSOR packet format, service discovery and
-   registry transactions from matching sources or captured stock traffic.
+1. Verify SMD IPC and the candidate SENSOR/SMR packet format, service
+   discovery and registry transactions against flo firmware or captured
+   stock traffic; the Qualcomm source above is not exact-flo provenance.
    Resolve ownership of bus, clocks, resets and sensor power.
-2. Add a native ARM7 DSPS remoteproc driver, DT binding and reserved-memory
-   region. Validate every segment before writes; use secure/nonsecure paths
-   only when their lifecycle is implemented. Handle boot failure, watchdog,
-   reset, shutdown, reload and suspend without corrupting shared memory.
+2. Boot-test the isolated ARM7 DSPS remoteproc driver, DT binding and
+   reserved-memory region with recovery available. Verify the carveout in
+   the live memory map and exercise start, stop, failure, watchdog, reset,
+   shutdown, reload and suspend without corrupting shared memory. The host
+   build and unit tests do not establish these runtime properties.
 3. Expose actual measurements through IIO. Retain valid per-device calibration;
    verify scale, axes, mount matrix, timestamps and six static poses. Never
    register a synthetic accelerometer merely to make a proxy detect one.
