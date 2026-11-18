@@ -40,6 +40,21 @@ still need to be separated. The identical unsymbolized offset in the second
 SIGSEGV is strong evidence for the same immediate fault, not proof of an
 identical lower-level trigger.
 
+The exact [GTK 4.24.1 GL-context implementation][gtk-context] shows why the
+warning can lead to that fault: `gdk_gl_context_make_current()` logs
+`gdk_gl_context_make_current() failed` and returns when the backend's
+`make_current` method fails. The default EGL backend returns failure if its
+EGL context is absent or `eglMakeCurrent()` returns false. The
+[GL renderer][gtk-renderer] calls that `void` function, and the
+[GPU renderer][gtk-gpu-renderer] continues to create a backbuffer without
+checking `gdk_gl_context_get_current()`. The symbolized crash reaches
+`gsk_gl_device_find_gl_format()` with that current context null. This
+source path explains the immediate GTK error-handling failure after a
+failed context activation. It does not distinguish a missing backend EGL
+context from an `eglMakeCurrent()` error, nor identify a Mesa, DRM, or
+compositor cause. The next native reproduction should capture `eglGetError()`
+at the first failed `eglMakeCurrent()` and the EGL context/surface handles.
+
 The copied core and debug package were extracted only into a private temporary
 directory on the host and removed when GDB finished. No process memory or
 firmware payload was committed.
@@ -78,6 +93,10 @@ it does not replace a fresh Settings launch test. The SIGTRAPs must not be
 counted as additional reproductions of the GTK null-GL-context SIGSEGV.
 Core copies and binaries used for this analysis were held in private
 temporary directories and removed after symbolization.
+
+[gtk-context]: https://gitlab.gnome.org/GNOME/gtk/-/raw/4.24.1/gdk/gdkglcontext.c
+[gtk-renderer]: https://gitlab.gnome.org/GNOME/gtk/-/raw/4.24.1/gsk/gpu/gskglrenderer.c
+[gtk-gpu-renderer]: https://gitlab.gnome.org/GNOME/gtk/-/raw/4.24.1/gsk/gpu/gskgpurenderer.c
 
 Next investigation: reproduce with a small GTK4 GL surface on the tablet
 while power and physical recovery are stable; collect the *first* EGL/GDK/Mesa
