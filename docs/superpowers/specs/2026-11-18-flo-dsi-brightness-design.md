@@ -38,6 +38,18 @@ visual test, proceed with hardware timing evidence before approach 2 or
 the complete command-mode implementation. No UI throttling or synthetic
 brightness backend is an accepted resolution.
 
+## r45 outcome
+
+r45 did not reach the visual brightness comparison. After a normal boot
+with greetd and Wi-Fi active, the user found the display black or stuck
+and could not access the session or open the notification panel. Several
+Power key presses are visible in the journal; Wi-Fi was unreachable until
+a manual reboot. The tablet was downgraded over Wi-Fi to r44, which again
+passed the user's greeter, login and touch check. Treat continuous clock
+alone as an unsuccessful candidate. The exact failure mechanism is not
+established, so the next driver change needs direct trace of display
+disable/enable and DSI lane/PHY state across DPMS before another boot.
+
 ## Validation
 
 - Compare r44 and r45 with the same 38-write rapid sequence and the
