@@ -1210,12 +1210,16 @@ cmd_launch_crush() {
 		fi
 		;;
 	esac
-	# Export the key only into the child. Do not print it.
+	# Export the key only into the child. Do not print it, and never put
+	# it on a process argv (no `env KEY=value`).
+	CRUSH_GLOBAL_CONFIG=$gdir
+	export CRUSH_GLOBAL_CONFIG
 	if [ -n "$envname" ]; then
 		key=$(read_secret_key)
-		exec env "$envname=$key" CRUSH_GLOBAL_CONFIG="$gdir" "$bin"
+		# envname is a hardcoded whitelist (ANTHROPIC/OPENAI/XAI_API_KEY).
+		export "$envname=$key"
 	fi
-	exec env CRUSH_GLOBAL_CONFIG="$gdir" "$bin"
+	exec "$bin"
 }
 
 cmd_local_status() {

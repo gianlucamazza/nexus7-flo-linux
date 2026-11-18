@@ -1214,6 +1214,72 @@ class FloAgentsTests(unittest.TestCase):
         self.assertNotIn(self.TEST_API_KEY, text)
         self.assertEqual(user_crush.read_text(), '{"keep":"me"}\n')
 
+    def test_launch_crush_does_not_put_api_key_on_argv(self):
+        tarpath, sha = self.make_crush_tarball()
+        extra = self.local_install_env(tarpath, sha)
+        self.write_config()
+        self.assertEqual(self.run_cli(['local', 'install'], extra=extra).returncode, 0)
+        self.assertEqual(
+            self.run_cli(['config', 'set', 'local.provider', 'anthropic'], extra=extra).returncode,
+            0,
+        )
+        self.assertEqual(
+            self.run_cli(['config', 'set', 'local.model', 'claude-placeholder'], extra=extra).returncode,
+            0,
+        )
+        self.assertEqual(
+            self.run_cli(
+                ['secret', 'set', 'api_key'],
+                extra=extra,
+                input_text=self.TEST_API_KEY + '\n',
+            ).returncode,
+            0,
+        )
+        env_mark = self.log_dir / 'env-called'
+        env_bin = self.bin_dir / 'env'
+        env_bin.write_text(textwrap.dedent(f'''\
+            #!/bin/sh
+            printf 'called\\n' > "{env_mark}"
+            printf 'env must not be invoked\\n' >&2
+            exit 1
+            '''))
+        env_bin.chmod(0o755)
+        crush_out = self.log_dir / 'crush-child.json'
+        crush_bin = (
+            self.home / '.local' / 'share' / 'flo-agents' / 'crush' / '0.101.0' / 'crush'
+        )
+        crush_bin.write_text(textwrap.dedent(f'''\
+            #!/usr/bin/python3
+            import json, os, sys
+            data = {{
+                "argv": [os.path.basename(sys.argv[0]), *sys.argv[1:]],
+                "env_set": {{
+                    "ANTHROPIC_API_KEY": "ANTHROPIC_API_KEY" in os.environ,
+                    "CRUSH_GLOBAL_CONFIG": "CRUSH_GLOBAL_CONFIG" in os.environ,
+                }},
+            }}
+            with open({json.dumps(str(crush_out))}, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+                fh.write("\\n")
+            '''))
+        crush_bin.chmod(0o755)
+        if self.argv_log.exists():
+            self.argv_log.unlink()
+        proc = self.run_cli(['launch', 'crush'], extra=extra)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertFalse(env_mark.exists())
+        self.assertTrue(crush_out.is_file())
+        child = json.loads(crush_out.read_text())
+        self.assertTrue(child['env_set']['ANTHROPIC_API_KEY'])
+        self.assertTrue(child['env_set']['CRUSH_GLOBAL_CONFIG'])
+        argv_blob = json.dumps(child['argv'])
+        self.assertNotIn(self.TEST_API_KEY, argv_blob)
+        self.assertNotIn(self.TEST_API_KEY, json.dumps(child))
+        self.assertNotIn(self.TEST_API_KEY, proc.stdout)
+        self.assertNotIn(self.TEST_API_KEY, proc.stderr)
+        for call in self.recorded_argv():
+            self.assertNotIn(self.TEST_API_KEY, json.dumps(call))
+
     def test_local_uninstall_removes_tree_symlink_and_crush_config(self):
         tarpath, sha = self.make_crush_tarball()
         extra = self.local_install_env(tarpath, sha)
