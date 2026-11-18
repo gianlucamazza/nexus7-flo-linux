@@ -1,0 +1,429 @@
+#!/bin/sh
+# flo-agents — experimental opt-in helper. The tablet is the screen and
+# keyboard; agent CLIs run on a 64-bit host the user owns. Never downloads,
+# bundles or runs those CLIs here. Never stores secrets.
+# Userland: Nura (formerly postmarketOS), not a distro of this project.
+set -eu
+
+KNOWN_AGENTS='claude codex grok'
+
+die() {
+	printf '%s\n' "$*" >&2
+	exit 1
+}
+
+usage() {
+	printf '%s\n' \
+		'usage: flo-agents <command> [args]' \
+		'' \
+		'experimental remote-session helper (opt-in).' \
+		'This device is a screen and keyboard; CLIs run on a 64-bit host you own.' \
+		'' \
+		'commands:' \
+		'  setup          write config (and a ~/.local/bin wrapper)' \
+		'  list           print configured tool ids, one per line' \
+		'  launch [tool]  exec mosh/ssh session in this terminal' \
+		'  check          test host reachability and remote commands' \
+		'  host-help      print official host install/login commands' \
+		'  uninstall      remove our config and wrapper only' \
+		'  install        refused: never installs agent CLIs here' >&2
+}
+
+script_path() {
+	src=$0
+	case $src in
+	/*) ;;
+	*) src=$PWD/$src ;;
+	esac
+	if command -v readlink >/dev/null 2>&1; then
+		resolved=$(readlink -f "$src" 2>/dev/null) || resolved=
+		[ -n "$resolved" ] && src=$resolved
+	fi
+	printf '%s\n' "$src"
+}
+
+config_dir() {
+	if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+		printf '%s\n' "$XDG_CONFIG_HOME/flo-agents"
+	else
+		printf '%s\n' "${HOME:?}/.config/flo-agents"
+	fi
+}
+
+config_file() {
+	printf '%s/config\n' "$(config_dir)"
+}
+
+wrapper_path() {
+	printf '%s\n' "${HOME:?}/.local/bin/flo-agents"
+}
+
+require_safe_value() {
+	case $1 in
+	*"'"*) die "invalid config value" ;;
+	esac
+}
+
+validate_agent() {
+	case $1 in
+	claude|codex|grok) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+normalize_agents() {
+	# comma or space separated -> space separated tokens
+	printf '%s' "$1" | tr ',\t' '  '
+}
+
+agent_in_list() {
+	needle=$1
+	shift
+	for t in "$@"; do
+		[ "$t" = "$needle" ] && return 0
+	done
+	return 1
+}
+
+load_config() {
+	cfg=$(config_file)
+	[ -f "$cfg" ] || die "no config; run: flo-agents setup"
+	# shellcheck disable=SC1090
+	. "$cfg"
+	[ -n "${FLO_AGENT_HOST:-}" ] || die "FLO_AGENT_HOST missing"
+	[ -n "${FLO_AGENTS:-}" ] || die "FLO_AGENTS missing"
+	for t in $FLO_AGENTS; do
+		validate_agent "$t" || die "unknown agent in config: $t"
+	done
+	[ -n "${FLO_AGENT_DEFAULT:-}" ] || FLO_AGENT_DEFAULT=${FLO_AGENTS%% *}
+}
+
+remote_cmd_for() {
+	tool=$1
+	validate_agent "$tool" || die "unknown agent: $tool"
+	eval "printf '%s\n' \"\${FLO_AGENT_CMD_${tool}:-$tool}\""
+}
+
+first_word() {
+	set -f
+	# shellcheck disable=SC2086
+	set -- $1
+	set +f
+	printf '%s\n' "$1"
+}
+
+cmd_setup() {
+	force=0
+	host=
+	transport=
+	agents=
+	default=
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--force) force=1; shift ;;
+		--host)
+			[ $# -ge 2 ] || die "missing value for --host"
+			host=$2; shift 2 ;;
+		--host=*) host=${1#--host=}; shift ;;
+		--transport)
+			[ $# -ge 2 ] || die "missing value for --transport"
+			transport=$2; shift 2 ;;
+		--transport=*) transport=${1#--transport=}; shift ;;
+		--agents)
+			[ $# -ge 2 ] || die "missing value for --agents"
+			agents=$2; shift 2 ;;
+		--agents=*) agents=${1#--agents=}; shift ;;
+		--default)
+			[ $# -ge 2 ] || die "missing value for --default"
+			default=$2; shift 2 ;;
+		--default=*) default=${1#--default=}; shift ;;
+		-h|--help)
+			printf '%s\n' 'usage: flo-agents setup [--force] [--host user@host.example] [--transport mosh|ssh] [--agents "claude codex grok"] [--default claude]' >&2
+			exit 0 ;;
+		*) die "unknown option: $1" ;;
+		esac
+	done
+
+	if [ -z "$host" ]; then
+		if [ -t 0 ]; then
+			printf 'Remote host (user@host.example): ' >&2
+			read -r host
+		else
+			die "missing --host (or run interactively on a tty)"
+		fi
+	fi
+	[ -n "$host" ] || die "host is required"
+	case $host in
+	*" "*|*"	"*) die "host must be a single token, e.g. user@host.example" ;;
+	esac
+	require_safe_value "$host"
+
+	if [ -z "$transport" ]; then
+		if [ -t 0 ] && [ -z "${FLO_AGENTS_NONINTERACTIVE:-}" ]; then
+			printf 'Transport (mosh/ssh) [mosh]: ' >&2
+			read -r transport
+		fi
+		transport=${transport:-mosh}
+	fi
+	case $transport in
+	mosh|ssh) ;;
+	*) die "transport must be mosh or ssh" ;;
+	esac
+
+	if [ -z "$agents" ]; then
+		if [ -t 0 ] && [ -z "${FLO_AGENTS_NONINTERACTIVE:-}" ]; then
+			printf 'Agents (claude, codex, grok) [claude codex grok]: ' >&2
+			read -r agents
+		fi
+		agents=${agents:-$KNOWN_AGENTS}
+	fi
+	# shellcheck disable=SC2046,SC2086
+	set -- $(normalize_agents "$agents")
+	[ $# -gt 0 ] || die "FLO_AGENTS must be a non-empty subset of: $KNOWN_AGENTS"
+	agents=
+	first=
+	for t in "$@"; do
+		validate_agent "$t" || die "unknown agent: $t (want claude, codex and/or grok)"
+		[ -n "$first" ] || first=$t
+		agents="${agents:+$agents }$t"
+	done
+
+	if [ -z "$default" ]; then
+		if [ -t 0 ] && [ -z "${FLO_AGENTS_NONINTERACTIVE:-}" ]; then
+			printf 'Default agent [%s]: ' "$first" >&2
+			read -r default
+		fi
+		default=${default:-$first}
+	fi
+	validate_agent "$default" || die "unknown default agent: $default"
+	# shellcheck disable=SC2086
+	agent_in_list "$default" $agents || die "default $default is not in FLO_AGENTS"
+
+	dir=$(config_dir)
+	cfg=$dir/config
+	if [ -e "$cfg" ] && [ "$force" != 1 ]; then
+		if [ -t 0 ]; then
+			printf 'Config %s exists. Overwrite? [y/N] ' "$cfg" >&2
+			read -r ans
+			case $ans in
+			y|Y|yes|YES) ;;
+			*) die "not overwriting $cfg (pass --force)" ;;
+			esac
+		else
+			die "config exists; pass --force"
+		fi
+	fi
+
+	mkdir -p "$dir"
+	chmod 700 "$dir" 2>/dev/null || true
+	umask 077
+	tmp=$dir/config.tmp.$$
+	{
+		printf '%s\n' '# flo-agents config. POSIX sh key=value. No secrets.'
+		printf "FLO_AGENT_HOST='%s'\n" "$host"
+		printf "FLO_AGENT_TRANSPORT='%s'\n" "$transport"
+		printf "FLO_AGENTS='%s'\n" "$agents"
+		printf "FLO_AGENT_DEFAULT='%s'\n" "$default"
+		# shellcheck disable=SC2086
+		for t in $agents; do
+			printf "FLO_AGENT_CMD_%s='%s'\n" "$t" "$t"
+		done
+		printf '%s\n' 'FLO_AGENT_TMUX=1'
+	} >"$tmp"
+	chmod 600 "$tmp"
+	mv "$tmp" "$cfg"
+
+	self=$(script_path)
+	wrap=$(wrapper_path)
+	wrap_dir=$(dirname "$wrap")
+	mkdir -p "$wrap_dir"
+	if [ "$self" != "$wrap" ]; then
+		ln -sf "$self" "$wrap"
+	fi
+	printf 'wrote %s\n' "$cfg" >&2
+}
+
+cmd_list() {
+	load_config
+	for t in $FLO_AGENTS; do
+		printf '%s\n' "$t"
+	done
+}
+
+cmd_launch() {
+	tool=${1:-}
+	[ $# -le 1 ] || die "usage: flo-agents launch [tool]"
+	load_config
+	if [ -z "$tool" ]; then
+		tool=$FLO_AGENT_DEFAULT
+	fi
+	validate_agent "$tool" || die "unknown agent: $tool"
+	# shellcheck disable=SC2086
+	agent_in_list "$tool" $FLO_AGENTS || die "tool not configured: $tool"
+	cmd=$(remote_cmd_for "$tool")
+	[ -n "$cmd" ] || die "empty remote command for $tool"
+
+	transport=${FLO_AGENT_TRANSPORT:-mosh}
+	case $transport in
+	mosh|ssh) ;;
+	*) die "unknown transport: $transport" ;;
+	esac
+	if [ "$transport" = mosh ] && ! command -v mosh >/dev/null 2>&1; then
+		transport=ssh
+	fi
+
+	tmux_on=${FLO_AGENT_TMUX:-1}
+	set -f
+	# shellcheck disable=SC2086
+	if [ "$tmux_on" = 1 ]; then
+		set -- tmux new -A -s "flo-$tool" $cmd
+	else
+		set -- $cmd
+	fi
+	set +f
+
+	host=$FLO_AGENT_HOST
+	case $transport in
+	mosh)
+		command -v mosh >/dev/null 2>&1 || die "mosh not found"
+		exec mosh "$host" -- "$@"
+		;;
+	ssh)
+		command -v ssh >/dev/null 2>&1 || die "ssh not found"
+		exec ssh -t "$host" "$@"
+		;;
+	esac
+}
+
+cmd_check() {
+	load_config
+	command -v ssh >/dev/null 2>&1 || die "ssh not found"
+	host=$FLO_AGENT_HOST
+	printf 'host: %s\n' "$host"
+	if ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" true; then
+		printf 'reachable: yes\n'
+	else
+		printf 'reachable: no\n'
+		exit 1
+	fi
+	status=0
+	for tool in $FLO_AGENTS; do
+		cmd=$(remote_cmd_for "$tool")
+		name=$(first_word "$cmd")
+		if path=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" command -v "$name"); then
+			printf '%s: %s\n' "$tool" "$path"
+		else
+			printf '%s: missing\n' "$tool"
+			status=1
+		fi
+	done
+	exit "$status"
+}
+
+print_help_claude() {
+	printf '%s\n' \
+		'Claude Code (64-bit host, 4 GB+ RAM):' \
+		'  curl -fsSL https://claude.ai/install.sh | bash' \
+		'  then run: claude   # logs in on the host' \
+		'  docs: https://code.claude.com/docs/en/setup'
+}
+
+print_help_codex() {
+	printf '%s\n' \
+		'Codex CLI (64-bit host):' \
+		'  curl -fsSL https://chatgpt.com/codex/install.sh | sh' \
+		'  then: codex login' \
+		'     or: codex login --device-auth' \
+		'  docs: https://github.com/openai/codex'
+}
+
+print_help_grok() {
+	printf '%s\n' \
+		'Grok Build (64-bit host):' \
+		'  curl -fsSL https://x.ai/cli/install.sh | bash' \
+		'  then first-run browser login, or set XAI_API_KEY from https://console.x.ai' \
+		'  docs: https://docs.x.ai/build/overview'
+}
+
+cmd_host_help() {
+	tool=${1:-}
+	[ $# -le 1 ] || die "usage: flo-agents host-help [tool]"
+	printf '%s\n' \
+		'Official host install and login commands. Documentation only.' \
+		'Run these on a 64-bit host you own; never on this tablet.' \
+		'Authentication is always your own job; flo-agents does not read credentials.' \
+		''
+	if [ -z "$tool" ]; then
+		print_help_claude
+		printf '\n'
+		print_help_codex
+		printf '\n'
+		print_help_grok
+		return
+	fi
+	case $tool in
+	claude) print_help_claude ;;
+	codex) print_help_codex ;;
+	grok) print_help_grok ;;
+	*) die "unknown agent: $tool" ;;
+	esac
+}
+
+cmd_install() {
+	arch=$(uname -m)
+	printf '%s\n' 'flo-agents never downloads, bundles or runs agent installers.' >&2
+	case $arch in
+	x86_64|aarch64)
+		printf '%s\n' \
+			"This machine is $arch, but install and login stay your job." \
+			'See: flo-agents host-help' >&2
+		;;
+	*)
+		printf '%s\n' \
+			"Refusing local install on architecture '$arch'." \
+			'Official builds exist only for x86_64 and aarch64.' \
+			'This tablet is ARMv7 with 2 GB RAM; those CLIs need a 64-bit host' \
+			'(Claude Code: 4 GB+ RAM). Use remote mode instead:' \
+			'  flo-agents setup' \
+			'  flo-agents launch' \
+			'Host install docs: flo-agents host-help' >&2
+		;;
+	esac
+	exit 1
+}
+
+cmd_uninstall() {
+	dir=$(config_dir)
+	cfg=$dir/config
+	rm -f "$cfg"
+	rmdir "$dir" 2>/dev/null || rm -rf "$dir"
+	wrap=$(wrapper_path)
+	if [ -L "$wrap" ]; then
+		rm -f "$wrap"
+	fi
+}
+
+cmd=${1:-}
+if [ $# -gt 0 ]; then
+	shift
+fi
+case $cmd in
+setup) cmd_setup "$@" ;;
+list) cmd_list "$@" ;;
+launch) cmd_launch "$@" ;;
+check) cmd_check "$@" ;;
+host-help) cmd_host_help "$@" ;;
+uninstall) cmd_uninstall "$@" ;;
+install) cmd_install "$@" ;;
+-h|--help|help)
+	usage
+	exit 0
+	;;
+'')
+	usage
+	exit 1
+	;;
+*)
+	die "unknown command: $cmd"
+	;;
+esac

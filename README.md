@@ -35,12 +35,19 @@ Third-party sources (pmbootstrap, pmaports, Android platform-tools) are fetched
 into `upstream/` and `tools/` and are **not** part of this repository; pinned
 revisions are in `config/sources.lock.json`.
 
+## flo-agents (experimental, opt-in)
+
+The tablet is ARMv7 with 2 GB RAM. Official Claude Code, Codex CLI and
+Grok Build builds target x86_64/aarch64, so this repo does not install them
+locally. `scripts/flo-agents` opens a remote SSH or mosh session to a
+64-bit host you own. See [`docs/flo-agents.md`](docs/flo-agents.md).
+
 ## Layout
 
-- `scripts/` – host and device helpers (pmbootstrap wrapper, diagnostics, benchmarks)
+- `scripts/` – host and device helpers (pmbootstrap wrapper, diagnostics, benchmarks, flo-agents)
 - `config/` – udev/polkit/journald snippets and the pmbootstrap profile
 - `docs/` – architecture, kernel workflow, hardware notes
-- `tests/` – unit tests for the Python helpers
+- `tests/` – unit tests for the Python helpers and the flo-agents CLI
 
 Build output, images, backups, downloads and device reports stay local and are
 ignored by Git.
