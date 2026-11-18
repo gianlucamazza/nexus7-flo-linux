@@ -22,6 +22,25 @@ based on postmarketOS (renamed [Nura](https://nura.eco) in September 2026).
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): ordered milestones from the open issues.
 - [`docs/hw/MATRIX.md`](docs/hw/MATRIX.md): vendor-source review per peripheral.
 
+## Other APQ8064 devices
+
+This repository is a personal lab for the Nexus 7 2013 Wi-Fi (`flo`).
+It is not an official Nura or postmarketOS port, and it is not a
+distribution of its own (the userland is based on Nura/postmarketOS).
+
+The same SoC (Qualcomm APQ8064) already has mainline device trees for
+the Nexus 4 (`qcom-apq8064-lg-nexus4-mako.dts`), the Sony Xperia Z
+(`qcom-apq8064-sony-xperia-lagan-yuga.dts`), the Inforce IFC6410 and
+the CompuLab CM-QS600. Kernel work that touches shared drivers
+(MMCI/SD, tsens, 28nm-8960 DSI, APQ8064 CPU frequency, SDCC clocks)
+is intended to help that set too, once it is upstream. Device trees,
+the JDI panel, charger, Wi-Fi firmware and the touch shell are
+flo-specific and are not a port to those devices.
+
+A Galaxy S4 (`jflte`) device tree exists in the
+[apq8064-mainline](https://github.com/apq8064-mainline/linux) fork,
+not in mainline. No other ports are claimed here.
+
 ## Quick start (host)
 
 ```sh
