@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Incremental kernel builds for flo with pmbootstrap envkernel.
 #
-#   scripts/flo-kernel build     # make in ../linux-flo (.output)
+#   scripts/flo-kernel build     # make in $KTREE (default ../linux-flo next to this repo)
 #   scripts/flo-kernel package   # pmbootstrap build --envkernel (package from .output)
 #   scripts/flo-kernel patches   # regenerate pmaports patches from the git branch
 #
@@ -9,7 +9,7 @@
 # in minutes. The config lives in pmaports (config-postmarketos-qcom-apq8064.armv7).
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-KTREE=${KTREE:-../linux-flo}
+KTREE=${KTREE:-"$(cd -- "$ROOT/.." && pwd)/linux-flo"}
 PKG=linux-postmarketos-qcom-apq8064
 PKGDIR="$ROOT/upstream/pmaports/device/testing/$PKG"
 JOBS=${JOBS:-$(nproc)}

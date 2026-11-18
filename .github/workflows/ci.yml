@@ -1,0 +1,19 @@
+name: ci
+on: [push, pull_request]
+permissions: { contents: read }
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          files=$(grep -rlE '^#!.*\b(ba)?sh\b' scripts || true)
+          [ -z "$files" ] || shellcheck -S warning $files
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: python tests
+        run: python -m unittest discover -s tests -v
+      - name: secrets scan
+        uses: gitleaks/gitleaks-action@v2
+        env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }

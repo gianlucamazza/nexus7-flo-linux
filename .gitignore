@@ -1,9 +1,27 @@
+# Third-party checkouts and downloaded tools (never redistribute)
+/upstream/
 /tools/
 /downloads/
-/upstream/
+# pmbootstrap work dir, chroots, caches
 /build/
-/backups/*
-/reports/*
-/artifacts/*
+# Images, boot.img, recovery zips, dtbs, initramfs
+/artifacts/
+*.img
+*.zip
+*.apk
+*.qcow2
+# Private device data
+/backups/
+/reports/
 /config/pmbootstrap.cfg
+/config/*.bak*
+*.journal
+# Firmware blobs (never commit)
+*.mdt
+*.b[0-9][0-9]
+*.mbn
+# Local agent scratch
+/.superpowers/
+# Python
 __pycache__/
+*.pyc

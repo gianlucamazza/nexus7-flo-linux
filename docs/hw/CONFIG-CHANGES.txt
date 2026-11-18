@@ -2,7 +2,7 @@ Kernel config changes for the Nexus 7 2013 Wi-Fi (flo), Linux 7.2 apq8064-mainli
 ==================================================================================
 
 Reference config (read, not modified):
-  ../nexus7-omarchy/upstream/pmaports/device/testing/
+  upstream/pmaports/device/testing/
   linux-postmarketos-qcom-apq8064/config-postmarketos-qcom-apq8064.armv7
 
 "now" = value in that file. Symbols marked (hidden) do not appear in the file

@@ -1,62 +1,61 @@
-# Omarchy su Nexus 7 2013 Wi-Fi
+# nexus7-flo-linux
 
-Laboratorio per ASUS/Google Nexus 7 (2013), `flo` / `asus-flo`, ARMv7, 2 GB RAM.
-Preparato il 2026-11-08. Bootloader sbloccato secondo il proprietario;
-recovery presente ma tipo/versione e partizioni ancora da verificare.
+Tools, notes and patches for running mainline Linux on the
+**ASUS/Google Nexus 7 (2013) Wi-Fi** (`flo`, `asus-flo`, Qualcomm APQ8064, ARMv7),
+based on postmarketOS (renamed [Nura](https://nura.eco) in September 2026).
 
-## Obiettivo
+> Personal hardware lab, not an official Nura port. Expect breakage.
+> Flashing a device can erase your data: read `docs/FIRST-BOOT.md` first.
 
-Avviare Linux nativo, verificarne le periferiche e costruire un desktop ispirato
-ad Omarchy. Il port completo di Omarchy resta un obiettivo da valutare:
-ARMv7 non è AArch64 e i pacchetti ARM64 non funzionano su questo SoC.
-La base iniziale scelta è Nura/postmarketOS, dispositivo `asus-flo`.
-Questo repository non contiene ancora un'immagine Linux costruita o collaudata.
+## Related repositories
 
-## Comandi pronti
+| Repository | What it is |
+|---|---|
+| `nexus7-flo-linux` (this one) | build wrappers, diagnostics, hardware notes, status |
+| [`flo-shell`](https://github.com/gianlucamazza/flo-shell) | touch shell, greeter and session for the tablet (Quickshell + Hyprland) |
+| [`linux-flo`](https://github.com/gianlucamazza/linux-flo) | kernel branches on top of [apq8064-mainline/linux](https://github.com/apq8064-mainline/linux) |
 
-Dalla cartella del progetto:
+## Hardware status
+
+See [`docs/hw/MATRIX.md`](docs/hw/MATRIX.md). Only results measured on a real
+device are listed there; anything else is marked as untested.
+
+## Quick start (host)
 
 ```sh
-./scripts/doctor
-./scripts/inspect-device
-./scripts/pmb --version
-./scripts/device-info
-./scripts/pmb status
+./scripts/doctor          # check the host
+./scripts/pmb --version   # pmbootstrap wrapper using this project's config
+./scripts/inspect-device  # read-only info from one ADB/fastboot device
 ```
 
-`doctor` verifica il computer. `inspect-device` raccoglie proprietà e informazioni
-in sola lettura da un singolo dispositivo ADB autorizzato o fastboot.
-Entrambi salvano report locali privati. Nessuno dei due riavvia o modifica il tablet.
-Con più dispositivi usare `./scripts/inspect-device --serial SERIALE`.
-ADB può chiedere sul tablet l'autorizzazione del computer.
+Nothing in `scripts/` flashes, wipes or repartitions the tablet automatically.
+Third-party sources (pmbootstrap, pmaports, Android platform-tools) are fetched
+into `upstream/` and `tools/` and are **not** part of this repository; pinned
+revisions are in `config/sources.lock.json`.
 
-Gli strumenti Android ufficiali sono locali in `tools/platform-tools/`.
-`pmbootstrap` e i metadati pmaports sono in `upstream/`, con revisioni registrate
-in `config/sources.lock.json`. Kpartx è estratto localmente in `tools/host/usr/bin/`; la firma del pacchetto è verificata. Non sono stati installati pacchetti di sistema.
-La configurazione pmbootstrap e il suo percorso di lavoro restano nel progetto.
+## Layout
 
-## Percorso
+- `scripts/` – host and device helpers (pmbootstrap wrapper, diagnostics, benchmarks)
+- `config/` – udev/polkit/journald snippets and the pmbootstrap profile
+- `docs/` – architecture, kernel workflow, hardware notes
+- `tests/` – unit tests for the Python helpers
 
-1. Identificare ROM, recovery, batteria, bootloader e mappa delle partizioni.
-2. Salvare i dati e, dalla recovery, i backup di boot/recovery e configurazione.
-3. Confermare immagine di avvio, limiti di dimensione e percorso di recupero.
-4. Costruire una base console, preferendo un test temporaneo/netboot se supportato.
-5. Verificare display, touch, USB, Wi-Fi e alimentazione sul dispositivo reale.
-6. Provare Sway/Sxmo e misurare GPU/RAM; adattare poi l'esperienza Omarchy.
+Build output, images, backups, downloads and device reports stay local and are
+ignored by Git.
 
-Vedi [stato](docs/STATUS.md), [procedura](docs/FIRST-BOOT.md),
-[scelte tecniche](docs/ARCHITECTURE.md), [fonti](docs/SOURCES.md).
+## Licence
 
-## Struttura
+- Code (scripts, configuration, tests): MIT, see [`LICENSE`](LICENSE).
+- Documentation: CC BY 4.0, see [`docs/LICENSE.md`](docs/LICENSE.md).
+- Kernel patch files under `docs/` are GPL-2.0, like the kernel. The maintained
+  kernel branches live in [`linux-flo`](https://github.com/gianlucamazza/linux-flo).
 
-- `scripts/`: diagnostica e wrapper pmbootstrap.
-- `config/`: profilo locale e revisioni dei sorgenti.
-- `docs/`: piano, ricerca e verbale del dispositivo.
-- `upstream/`: checkout di terze parti, esclusi da Git.
-- `build/`: chroot e cache future di pmbootstrap, esclusi da Git.
-- `artifacts/`: immagini future e checksum, esclusi da Git.
-- `backups/`: backup privati del tablet, esclusi da Git.
-- `reports/`: diagnostica e log privati, esclusi da Git.
+Most of the documentation is in Italian; the original Italian README is
+[`README.it.md`](README.it.md).
 
-La creazione dell'immagine è separata dall'installazione sul tablet.
-Non sono inclusi comandi automatici di flash, cancellazione o ripartizionamento.
+## Scripts that talk to the tablet
+
+`scripts/flo-uibench` and `scripts/flo-diag` connect over SSH and need the
+tablet address explicitly, for example `FLO_HOST=root@<address> scripts/flo-diag`.
+Private data (SSH key, results) is kept outside the repository, in
+`$FLO_PRIV` (default `~/nexus7-recovery-20261114`).
