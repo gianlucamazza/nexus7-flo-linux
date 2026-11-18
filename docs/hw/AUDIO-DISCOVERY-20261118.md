@@ -9,6 +9,14 @@ APQ8064, ma restano disabilitati nel DTS flo. La bozza
 (`slim217,60`) e non va installata come soluzione audio completa:
 il driver corrente offre solo playback parziale e la route speaker della
 machine driver usa LINEOUT2/4, mentre le fonti flo indicano LINEOUT1/3.
+Inoltre le DAI codec e CPU correnti dichiarano un solo canale a 48 kHz:
+aggiungere soltanto LINEOUT1/3 non renderebbe stereo la scheda.
+Nel percorso host `apq8064-slim.c`, `apq8064_slim_hw_params()` imposta
+`ch_count=1`, un solo channel ID `138`, `port_mask=BIT(10)` e il DMA
+usa sempre la porta manager 0. Il driver vendor assegna ai primi due
+slave RX i channel ID 138 e 139. L'estensione a due canali richiede
+quindi anche una verifica del formato interleaved e dei port/DMA del
+controller; il solo cambio di `channels_max` sarebbe scorretto.
 
 ## Identificazione della revisione
 
@@ -43,9 +51,14 @@ driver riconosce solo product code `0x60`. Un DTS che dichiari soltanto
    prima clock, supply, reset e pinmux; non attribuire automaticamente
    l'assenza a un codec guasto o a una revisione non supportata.
 3. Solo dopo avere identificato la revisione, costruire il driver codec
-   adatto e la scheda ASoC. Provare cuffie a volume basso, poi RX3/RX4,
-   LINEOUT1/3 e l'amplificatore PM8921 GPIO18; infine DMIC1, ADC2 e
-   MICBIAS2. Verificare ogni percorso con ALSA prima di UCM/PipeWire.
+   adatto e la scheda ASoC. Portare due canali anche nelle DAI codec e CPU
+   e nella mappa SLIMbus prima di abilitare lo speaker. Il
+   [profilo mixer flo](https://android.googlesource.com/device/asus/flo/+/506899bff87a2b4d09e8d1312129d1391e78b549/mixer_paths.xml)
+   imposta `SLIM_0_RX Channels=Two`, RX3 MIX1 da RX2 e RX4 MIX1 da RX1;
+   la route `speaker-reverse` scambia i canali. Provare cuffie a volume
+   basso, poi RX3/RX4, LINEOUT1/3 e l'amplificatore PM8921 GPIO18;
+   infine DMIC1, ADC2 e MICBIAS2. Verificare ogni percorso con ALSA
+   prima di UCM/PipeWire.
 
 ## Fonti controllate
 
@@ -55,5 +68,11 @@ driver riconosce solo product code `0x60`. Un DTS che dichiari soltanto
   `slim_add_device()`; `drivers/slimbus/qcom-ctrl.c`, gestione
   `REPORT_PRESENT` e `qcom_slim_probe()`.
 - `sound/soc/codecs/wcd9310.c`, `tabla_slim_probe()` e `tabla_slim_ids[]`.
+- `sound/soc/qcom/apq8064-slim.c`: DAI CPU limitata a un canale;
+  `sound/soc/codecs/wcd9310.c`: DAI codec limitata a un canale.
+- [Driver vendor WCD9310](https://github.com/omnirom/android_kernel_asus_flo/blob/android-7.1/sound/soc/codecs/wcd9310.c)
+  e relativo header registri: RX3/RX4, mux DSM di RX4, LINEOUT1/3;
+  [mappatura SLIMbus vendor](https://github.com/omnirom/android_kernel_asus_flo/blob/android-7.1/drivers/mfd/wcd9xxx-slimslave.c)
+  per i channel ID 138 e 139.
 - `docs/hw/MATRIX.md` e `0006-flo-audio-wcd9310-headphone.patch` per le
   fonti vendor flo e i limiti della bozza esistente.
