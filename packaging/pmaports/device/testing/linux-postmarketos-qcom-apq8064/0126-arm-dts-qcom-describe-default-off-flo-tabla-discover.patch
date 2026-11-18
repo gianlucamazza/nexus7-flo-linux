@@ -1,0 +1,207 @@
+From 6c1990d8cd08c73c6545118243a6ad07a836eae7 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Wed, 18 Nov 2026 02:44:57 +0100
+Subject: [PATCH 121/121] arm: dts: qcom: describe default-off flo tabla
+ discovery
+
+---
+ .../dts/qcom/qcom-apq8064-asus-nexus7-flo.dts |  41 +++++++
+ .../selftests/flo/test_audio_discovery_dtb.py | 113 ++++++++++++++++++
+ 2 files changed, 154 insertions(+)
+ create mode 100644 tools/testing/selftests/flo/test_audio_discovery_dtb.py
+
+diff --git a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+index 858ed603e..6a90ed886 100644
+--- a/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
++++ b/arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts
+@@ -76,6 +76,20 @@ reboot-mode {
+ 	battery: battery {
+ 		compatible = "simple-battery";
+ 	};
++
++	/* Manual, default-off codec power sequence for SLIMbus enumeration. */
++	tabla-discovery {
++		compatible = "asus,flo-tabla-discovery";
++		slim-controller = <&slimbus>;
++		vdd-1p8-supply = <&pm8921_s4>;
++		vdd-1p25-supply = <&pm8921_l25>;
++		reset-gpios = <&pm8921_gpio 34 GPIO_ACTIVE_LOW>;
++		clocks = <&lcc CODEC_I2S_SPKR_OSR_CLK>;
++		clock-names = "mclk";
++		pinctrl-names = "default";
++		pinctrl-0 = <&cdc_mclk_state &cdc_reset_state>;
++		status = "okay";
++	};
+ };
+ 
+ &dsi0 {
+@@ -413,6 +427,20 @@ &usb1 {
+ };
+ 
+ &tlmm_pinmux {
++	cdc_mclk_state: cdc-mclk-state {
++		pins = "gpio39";
++		function = "codec_spkr_i2s";
++		drive-strength = <8>;
++		bias-disable;
++	};
++
++	slimbus_default_state: slimbus-default-state {
++		pins = "gpio40", "gpio41";
++		function = "slimbus";
++		drive-strength = <8>;
++		bias-bus-hold;
++	};
++
+ 	usb_id_pin: usb-id-state {
+ 		pins = "gpio77";
+ 		function = "gpio";
+@@ -423,6 +451,13 @@ usb_id_pin: usb-id-state {
+ };
+ 
+ &pm8921_gpio {
++	cdc_reset_state: cdc-reset-state {
++		pins = "gpio34";
++		function = "normal";
++		bias-disable;
++		qcom,no-inversion;
++	};
++
+ 	volume_keys_pin_a: volume-keys-active {
+ 		pins = "gpio4", "gpio38";
+ 		function = "normal";
+@@ -431,6 +466,12 @@ volume_keys_pin_a: volume-keys-active {
+ 	};
+ };
+ 
++&slimbus {
++	pinctrl-names = "default";
++	pinctrl-0 = <&slimbus_default_state>;
++	status = "okay";
++};
++
+ /* Qualcomm WCN3660 Wi-Fi. */
+ &riva {
+ 	pinctrl-names = "default";
+diff --git a/tools/testing/selftests/flo/test_audio_discovery_dtb.py b/tools/testing/selftests/flo/test_audio_discovery_dtb.py
+new file mode 100644
+index 000000000..5d77a501a
+--- /dev/null
++++ b/tools/testing/selftests/flo/test_audio_discovery_dtb.py
+@@ -0,0 +1,113 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: GPL-2.0-only
++"""Check the compiled flo discovery DTB, including resolved phandles."""
++
++import argparse
++import struct
++import unittest
++from pathlib import Path
++
++
++def cells(data):
++    if len(data) % 4:
++        raise ValueError("unaligned cells")
++    return struct.unpack(f">{len(data) // 4}I", data)
++
++
++def strings(data):
++    return tuple(part.decode() for part in data.rstrip(b"\0").split(b"\0"))
++
++
++def read_dtb(path):
++    blob = Path(path).read_bytes()
++    magic, size, structs, names = struct.unpack_from(">4I", blob)
++    if magic != 0xD00DFEED or size > len(blob):
++        raise ValueError("invalid DTB")
++    tree = {}
++    stack = []
++    pos = structs
++    while True:
++        token, = struct.unpack_from(">I", blob, pos)
++        pos += 4
++        if token == 9:
++            return tree
++        if token == 1:
++            end = blob.index(b"\0", pos)
++            stack.append(blob[pos:end].decode())
++            pos = (end + 4) & ~3
++            tree["/" + "/".join(x for x in stack if x)] = {}
++        elif token == 2:
++            stack.pop()
++        elif token == 3:
++            length, offset = struct.unpack_from(">2I", blob, pos)
++            pos += 8
++            end = blob.index(b"\0", names + offset)
++            name = blob[names + offset:end].decode()
++            tree["/" + "/".join(x for x in stack if x)][name] = blob[pos:pos + length]
++            pos = (pos + length + 3) & ~3
++        elif token != 4:
++            raise ValueError(f"bad FDT token {token}")
++
++
++class FloAudioDiscoveryDTB(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.tree = read_dtb(args.dtb)
++        cls.handles = {
++            cells(props["phandle"])[0]: (path, props)
++            for path, props in cls.tree.items() if "phandle" in props
++        }
++
++    def node(self, suffix):
++        matches = [(path, props) for path, props in self.tree.items()
++                   if path.endswith(suffix)]
++        self.assertEqual(len(matches), 1, suffix)
++        return matches[0][1]
++
++    def test_supplies_reset_and_mclk(self):
++        node = self.node("/tabla-discovery")
++        self.assertEqual(strings(node["compatible"]),
++                         ("asus,flo-tabla-discovery",))
++        self.assertEqual(self.handles[cells(node["vdd-1p8-supply"])[0]][0]
++                         .split("/")[-1], "s4")
++        self.assertEqual(self.handles[cells(node["vdd-1p25-supply"])[0]][0]
++                         .split("/")[-1], "l25")
++        self.assertEqual([key for key in node if key.endswith("-supply")],
++                         ["vdd-1p8-supply", "vdd-1p25-supply"])
++        reset = cells(node["reset-gpios"])
++        self.assertEqual(reset[1:], (34, 1))  # PM8921 GPIO34, active low.
++        self.assertTrue(self.handles[reset[0]][0].endswith("/gpio@150"))
++        mclk = cells(node["clocks"])
++        self.assertEqual(mclk[1:], (23,))  # CODEC_I2S_SPKR_OSR_CLK.
++        self.assertTrue(self.handles[mclk[0]][0].endswith(
++            "/clock-controller@28000000"))
++        self.assertEqual(strings(node["clock-names"]), ("mclk",))
++
++    def test_controller_and_pins(self):
++        node = self.node("/tabla-discovery")
++        controller = self.handles[cells(node["slim-controller"])[0]][1]
++        self.assertEqual(strings(controller["status"]), ("okay",))
++        slim_pins = self.handles[cells(controller["pinctrl-0"])[0]][1]
++        self.assertEqual(strings(slim_pins["pins"]), ("gpio40", "gpio41"))
++        self.assertEqual(strings(slim_pins["function"]), ("slimbus",))
++        mclk_pins = self.handles[cells(node["pinctrl-0"])[0]][1]
++        self.assertEqual(strings(mclk_pins["pins"]), ("gpio39",))
++        self.assertEqual(strings(mclk_pins["function"]),
++                         ("codec_spkr_i2s",))
++        self.assertEqual(strings(node["status"]), ("okay",))
++        bam = self.node("/dma-controller@28084000")
++        self.assertEqual(strings(bam["status"]), ("disabled",))
++
++    def test_no_codec_or_audio_route(self):
++        compatibles = [value for props in self.tree.values()
++                       for key, value in props.items() if key == "compatible"]
++        self.assertFalse(any(b"slim217," in value for value in compatibles))
++        self.assertFalse(any(b"simple-audio-card" in value
++                             for value in compatibles))
++
++
++if __name__ == "__main__":
++    parser = argparse.ArgumentParser()
++    parser.add_argument("dtb")
++    args = parser.parse_args()
++    unittest.main(argv=[__file__])
+-- 
+2.56.0
+

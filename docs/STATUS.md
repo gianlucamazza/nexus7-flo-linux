@@ -937,4 +937,5 @@ Include DMA/errorpath/clock, lock/greeter, diagnosi e correzione glitch,
 DSPS/IIO/autorotazione, audio, Hyprland/portali/crash e audit hardware/workaround.
 
 Per le verifiche successive del 18 novembre e i problemi ancora aperti,
-vedi [il registro aggiornato](hw/ISSUES-20261117.md).
+vedi [l'analisi corrente](hw/ANALYSIS-20261118.md) e
+[il registro storico](hw/ISSUES-20261117.md).

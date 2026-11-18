@@ -1,0 +1,313 @@
+From 6a3fbe970d2de9fd4f7f88724333013c7455b089 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Wed, 18 Nov 2026 03:21:24 +0100
+Subject: [PATCH] misc: keep flo tabla power safe across shutdown errors
+
+---
+ drivers/misc/flo_tabla_discovery.c      | 75 ++++++++++++++-----------
+ drivers/misc/flo_tabla_discovery.h      |  1 +
+ drivers/misc/flo_tabla_discovery_test.c | 69 ++++++++++++++++++++++-
+ 3 files changed, 110 insertions(+), 35 deletions(-)
+
+diff --git a/drivers/misc/flo_tabla_discovery.c b/drivers/misc/flo_tabla_discovery.c
+index 00b41a57b..bb07f0033 100644
+--- a/drivers/misc/flo_tabla_discovery.c
++++ b/drivers/misc/flo_tabla_discovery.c
+@@ -18,7 +18,6 @@
+ #define FLO_TABLA_MCLK_HZ 12288000
+ 
+ struct flo_tabla_discovery {
+-	struct device *dev;
+ 	struct device *controller;
+ 	struct regulator *s4;
+ 	struct regulator *l25;
+@@ -60,57 +59,56 @@ static int flo_tabla_apply(void *data, enum flo_tabla_action action)
+ 		return regulator_disable(td->s4);
+ 	case FLO_TABLA_CONTROLLER_PUT:
+ 		pm_runtime_mark_last_busy(td->controller);
+-		pm_runtime_put_autosuspend(td->controller);
+-		return 0;
++		return pm_runtime_put_autosuspend(td->controller);
+ 	}
+ 	return -EINVAL;
+ }
+ 
+ static int flo_tabla_power_off(struct flo_tabla_power *p)
+ {
+-	int ret, first_error = 0;
++	int ret;
+ 
+-	if (!p->controller_on && !p->s4_on && !p->l25_on && !p->mclk_on)
++	if (!p->controller_on && !p->s4_on && !p->l25_on && !p->mclk_on &&
++	    p->reset_asserted)
+ 		return 0;
+ 
+-	ret = p->apply(p->ctx, FLO_TABLA_RESET_ASSERT);
+-	if (ret)
+-		first_error = ret;
++	p->enabled = false;
++	if (!p->reset_asserted) {
++		ret = p->apply(p->ctx, FLO_TABLA_RESET_ASSERT);
++		if (ret)
++			return ret;
++		p->reset_asserted = true;
++	}
+ 	if (p->mclk_on) {
+ 		ret = p->apply(p->ctx, FLO_TABLA_MCLK_DISABLE);
+-		if (!ret)
+-			p->mclk_on = false;
+-		else if (!first_error)
+-			first_error = ret;
++		if (ret)
++			return ret;
++		p->mclk_on = false;
+ 	}
+ 	if (p->l25_on) {
+ 		ret = p->apply(p->ctx, FLO_TABLA_L25_DISABLE);
+-		if (!ret)
+-			p->l25_on = false;
+-		else if (!first_error)
+-			first_error = ret;
++		if (ret)
++			return ret;
++		p->l25_on = false;
+ 	}
+ 	if (p->s4_on) {
+ 		ret = p->apply(p->ctx, FLO_TABLA_S4_DISABLE);
+-		if (!ret)
+-			p->s4_on = false;
+-		else if (!first_error)
+-			first_error = ret;
++		if (ret)
++			return ret;
++		p->s4_on = false;
+ 	}
+ 	if (p->controller_on) {
+ 		ret = p->apply(p->ctx, FLO_TABLA_CONTROLLER_PUT);
+-		if (!ret)
+-			p->controller_on = false;
+-		else if (!first_error)
+-			first_error = ret;
++		/* The reference is dropped even if autosuspend scheduling fails. */
++		p->controller_on = false;
++		return ret;
+ 	}
+-	p->enabled = false;
+-	return first_error;
++	return 0;
+ }
+ 
+ int flo_tabla_power_set(struct flo_tabla_power *p, bool enable)
+ {
+-	int ret;
++	int ret, cleanup_ret;
+ 
+ 	if (!enable)
+ 		return flo_tabla_power_off(p);
+@@ -134,12 +132,14 @@ int flo_tabla_power_set(struct flo_tabla_power *p, bool enable)
+ 	ret = p->apply(p->ctx, FLO_TABLA_RESET_ASSERT);
+ 	if (ret)
+ 		goto unwind;
++	p->reset_asserted = true;
+ 	ret = p->apply(p->ctx, FLO_TABLA_WAIT_RESET);
+ 	if (ret)
+ 		goto unwind;
+ 	ret = p->apply(p->ctx, FLO_TABLA_RESET_DEASSERT);
+ 	if (ret)
+ 		goto unwind;
++	p->reset_asserted = false;
+ 	ret = p->apply(p->ctx, FLO_TABLA_WAIT_BOOT);
+ 	if (ret)
+ 		goto unwind;
+@@ -154,7 +154,9 @@ int flo_tabla_power_set(struct flo_tabla_power *p, bool enable)
+ 	return 0;
+ 
+ unwind:
+-	flo_tabla_power_off(p);
++	cleanup_ret = flo_tabla_power_off(p);
++	if (cleanup_ret)
++		return cleanup_ret;
+ 	return ret;
+ }
+ EXPORT_SYMBOL_GPL(flo_tabla_power_set);
+@@ -204,6 +206,11 @@ static int flo_tabla_probe(struct platform_device *pdev)
+ 	of_node_put(node);
+ 	if (!controller)
+ 		return -EPROBE_DEFER;
++	if (!device_link_add(dev, &controller->dev,
++			     DL_FLAG_AUTOREMOVE_CONSUMER)) {
++		ret = -ENOMEM;
++		goto put_controller;
++	}
+ 	if (!device_is_bound(&controller->dev)) {
+ 		ret = -EPROBE_DEFER;
+ 		goto put_controller;
+@@ -214,7 +221,6 @@ static int flo_tabla_probe(struct platform_device *pdev)
+ 		ret = -ENOMEM;
+ 		goto put_controller;
+ 	}
+-	td->dev = dev;
+ 	td->controller = &controller->dev;
+ 	td->s4 = devm_regulator_get(dev, "vdd-1p8");
+ 	if (IS_ERR(td->s4)) {
+@@ -236,13 +242,10 @@ static int flo_tabla_probe(struct platform_device *pdev)
+ 		ret = dev_err_probe(dev, PTR_ERR(td->mclk), "codec MCLK\n");
+ 		goto put_controller;
+ 	}
+-	if (!device_link_add(dev, td->controller, DL_FLAG_AUTOREMOVE_CONSUMER)) {
+-		ret = -ENOMEM;
+-		goto put_controller;
+-	}
+ 	mutex_init(&td->lock);
+ 	td->power.apply = flo_tabla_apply;
+ 	td->power.ctx = td;
++	td->power.reset_asserted = true;
+ 	platform_set_drvdata(pdev, td);
+ 	ret = device_create_file(dev, &dev_attr_enabled);
+ 	if (ret)
+@@ -257,11 +260,14 @@ static int flo_tabla_probe(struct platform_device *pdev)
+ static void flo_tabla_remove(struct platform_device *pdev)
+ {
+ 	struct flo_tabla_discovery *td = platform_get_drvdata(pdev);
++	int ret;
+ 
+ 	device_remove_file(&pdev->dev, &dev_attr_enabled);
+ 	mutex_lock(&td->lock);
+-	flo_tabla_power_set(&td->power, false);
++	ret = flo_tabla_power_set(&td->power, false);
+ 	mutex_unlock(&td->lock);
++	if (ret)
++		dev_err(&pdev->dev, "codec shutdown failed: %d\n", ret);
+ }
+ 
+ static int flo_tabla_suspend(struct device *dev)
+@@ -288,6 +294,7 @@ static struct platform_driver flo_tabla_driver = {
+ 	.remove = flo_tabla_remove,
+ 	.driver = {
+ 		.name = "flo-tabla-discovery",
++		.suppress_bind_attrs = true,
+ 		.of_match_table = flo_tabla_of_match,
+ 		.pm = pm_sleep_ptr(&flo_tabla_pm_ops),
+ 	},
+diff --git a/drivers/misc/flo_tabla_discovery.h b/drivers/misc/flo_tabla_discovery.h
+index 647a9d121..f0949afdc 100644
+--- a/drivers/misc/flo_tabla_discovery.h
++++ b/drivers/misc/flo_tabla_discovery.h
+@@ -28,6 +28,7 @@ struct flo_tabla_power {
+ 	bool s4_on;
+ 	bool l25_on;
+ 	bool mclk_on;
++	bool reset_asserted;
+ };
+ 
+ int flo_tabla_power_set(struct flo_tabla_power *power, bool enable);
+diff --git a/drivers/misc/flo_tabla_discovery_test.c b/drivers/misc/flo_tabla_discovery_test.c
+index 98f5d9c5b..b2893c623 100644
+--- a/drivers/misc/flo_tabla_discovery_test.c
++++ b/drivers/misc/flo_tabla_discovery_test.c
+@@ -8,6 +8,7 @@ struct tabla_test_context {
+ 	int count;
+ 	int fail_at;
+ 	int fail_error;
++	bool put_drops_on_error;
+ 	bool controller_on;
+ 	bool s4_on;
+ 	bool l25_on;
+@@ -20,8 +21,12 @@ static int tabla_test_apply(void *data, enum flo_tabla_action action)
+ 	struct tabla_test_context *ctx = data;
+ 
+ 	ctx->actions[ctx->count++] = action;
+-	if (action == ctx->fail_at)
++	if (action == ctx->fail_at) {
++		if (action == FLO_TABLA_CONTROLLER_PUT &&
++		    ctx->put_drops_on_error)
++			ctx->controller_on = false;
+ 		return ctx->fail_error;
++	}
+ 	switch (action) {
+ 	case FLO_TABLA_CONTROLLER_GET:
+ 		ctx->controller_on = true;
+@@ -66,6 +71,8 @@ static void tabla_test_init(struct tabla_test_context *ctx)
+ 	ctx->fail_error = -EIO;
+ 	ctx->power.apply = tabla_test_apply;
+ 	ctx->power.ctx = ctx;
++	ctx->power.reset_asserted = true;
++	ctx->reset_asserted = true;
+ }
+ 
+ static void tabla_test_off(struct kunit *test, struct tabla_test_context *ctx)
+@@ -157,11 +164,71 @@ static void tabla_suspend_and_remove_power_off(struct kunit *test)
+ 	tabla_test_off(test, &ctx);
+ }
+ 
++static void tabla_failed_pm_put_does_not_drop_reference_twice(struct kunit *test)
++{
++	struct tabla_test_context ctx;
++	int count;
++
++	tabla_test_init(&ctx);
++	ctx.reset_asserted = true;
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, true), 0);
++	ctx.fail_at = FLO_TABLA_CONTROLLER_PUT;
++	ctx.fail_error = -EAGAIN;
++	ctx.put_drops_on_error = true;
++	KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, false), -EAGAIN);
++	KUNIT_EXPECT_FALSE(test, ctx.power.controller_on);
++	count = ctx.count;
++	KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, false), 0);
++	KUNIT_EXPECT_EQ(test, ctx.count, count);
++	ctx.fail_at = -1;
++	KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, true), 0);
++	KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, false), 0);
++	tabla_test_off(test, &ctx);
++}
++
++static void tabla_failed_reset_assert_keeps_power_for_retry(struct kunit *test)
++{
++	struct tabla_test_context ctx;
++
++	tabla_test_init(&ctx);
++	ctx.reset_asserted = true;
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, true), 0);
++	ctx.fail_at = FLO_TABLA_RESET_ASSERT;
++	KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, false), -EIO);
++	KUNIT_EXPECT_TRUE(test, ctx.controller_on);
++	KUNIT_EXPECT_TRUE(test, ctx.s4_on);
++	KUNIT_EXPECT_TRUE(test, ctx.l25_on);
++	KUNIT_EXPECT_TRUE(test, ctx.mclk_on);
++	ctx.fail_at = -1;
++	KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, false), 0);
++	tabla_test_off(test, &ctx);
++}
++
++static void tabla_failed_regulator_disable_keeps_controller(struct kunit *test)
++{
++	struct tabla_test_context ctx;
++
++	tabla_test_init(&ctx);
++	ctx.reset_asserted = true;
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, true), 0);
++	ctx.fail_at = FLO_TABLA_L25_DISABLE;
++	KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, false), -EIO);
++	KUNIT_EXPECT_TRUE(test, ctx.l25_on);
++	KUNIT_EXPECT_TRUE(test, ctx.controller_on);
++	KUNIT_EXPECT_TRUE(test, ctx.reset_asserted);
++	ctx.fail_at = -1;
++	KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, false), 0);
++	tabla_test_off(test, &ctx);
++}
++
+ static struct kunit_case tabla_cases[] = {
+ 	KUNIT_CASE(tabla_enable_disable_is_balanced),
+ 	KUNIT_CASE(tabla_each_enable_failure_unwinds),
+ 	KUNIT_CASE(tabla_unbound_controller_never_powers_codec),
+ 	KUNIT_CASE(tabla_suspend_and_remove_power_off),
++	KUNIT_CASE(tabla_failed_pm_put_does_not_drop_reference_twice),
++	KUNIT_CASE(tabla_failed_reset_assert_keeps_power_for_retry),
++	KUNIT_CASE(tabla_failed_regulator_disable_keeps_controller),
+ 	{}
+ };
+ 
+-- 
+2.56.0
+

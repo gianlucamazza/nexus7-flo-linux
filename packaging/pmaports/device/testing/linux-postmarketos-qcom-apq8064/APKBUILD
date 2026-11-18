@@ -2,7 +2,7 @@ maintainer="Alexandre MINETTE <contact@alex-min.fr>"
 _flavor="postmarketos-qcom-apq8064"
 pkgname=linux-postmarketos-qcom-apq8064
 pkgver=7.2_p20261118101500
-pkgrel=46
+pkgrel=48
 _commit="cc2a6a249989c3bb23d3191afb97bf60f01d535f"
 pkgdesc="Mainline Kernel fork for APQ8064 devices"
 url="https://github.com/apq8064-mainline/linux"
@@ -74,6 +74,10 @@ source="
 	0122-usb-chipidea-settle-primary-detection.patch
 	0123-wifi-wcn36xx-propagate-firmware-scan-channel-failures.patch
 	0124-wifi-wcn36xx-apply-flo-firmware-frequency-limits.patch
+	0125-misc-add-controlled-flo-tabla-discovery-power-sequen.patch
+	0126-arm-dts-qcom-describe-default-off-flo-tabla-discover.patch
+	0127-misc-keep-flo-tabla-power-safe-across-shutdown-error.patch
+	0128-firmware-qcom-scm-distinguish-pas-start-failure-stages.patch
 "
 builddir="$srcdir/linux-$_commit"
 
@@ -105,7 +109,7 @@ package() {
 
 sha512sums="
 2474e2446a326b420ed3dd148a4a5d4857b9da99b35aec4be9bb93489e4f9eb8e94604546a6a3c7d2a52668866f95064f3efb158f9712be66d93f1fc8640e12f  cc2a6a249989c3bb23d3191afb97bf60f01d535f.tar.gz
-54d9773db1aa9e5eba79e2ca1313223c9ceb1d1ddca529b9b8439b03b469a8ec3382a2c1e960462a4e3390c418f065bf42db106c4eb698c92e5302bf8902b8f2  config-postmarketos-qcom-apq8064.armv7
+1a404b8de1cabfd8f4dc3e3677ef705e53a0e17aab267315a62d61ed4e7f376ec27a29f28757e2269e153400653c50c1b4caf3606da9fde92c373c789517cd99  config-postmarketos-qcom-apq8064.armv7
 0f6677a6d3e782f4b4c2fbd9fa9ae9e671b91d1b223ca2134dc7a167d32d9e0603a44c6c9401b5963c5bb774c858431ec88c1e42cbb7317ab6b1aa83b0378503  0000-revert-drm-msm-a3xx-in-stream-smmu-tlb-invalidation.patch
 2219cc45ad3a5265a09d4f7d15d4ea11f4f4e45702a68d75bb5d753ffcc3c241885d70ce0c6de98c886237dbb129be532e4eb61c15001fd654de9cb3c7400036  0001-drm-msm-dsi-phy-28nm-8960-report-the-VCO-rate-that-i.patch
 82c5163114a3f4a8b01f3fd3498b9883bd5eb484e82bdff6469ff4bf09711bcaaa93098c83d6e4917533708907fdced4677d15b82fecd993533706ca291bcc5a  0002-drm-msm-dsi-derive-v2-link-clocks-from-the-rate-the-.patch
@@ -141,4 +145,8 @@ a9ef29853a776968b3651763c6b51e457b7f137b1f2703494139e0585ea3cee8bf6c9b2a40f5975b
 f20682e9d96888eaeea3f9466c1ff6f75bb4e9025a1de8eaa820e5543af02fb628061eb82a8fe615c3993fcbfb64417a39807097cd3e5b488d0924cf5338f53a  0122-usb-chipidea-settle-primary-detection.patch
 7cae0fdd0b1e9d97e9c11b84562aa0ba9c67a04d1c29a6ca78ad8a6f51226beb11e004a06812d57df3c42a83af0e487d0c390ef3f836832c2d5536b7f0e58ed2  0123-wifi-wcn36xx-propagate-firmware-scan-channel-failures.patch
 4472033e0940e33a17e91f398d50bb64dc048de29d7f3b2ade7a6e6563ae8babfc5a4a8088947d0093fdc609990119d6fbcb01524e2103aa3f37300962272186  0124-wifi-wcn36xx-apply-flo-firmware-frequency-limits.patch
+584b2f1796a320c286dfdec38165e53a3733e9e593bb4adb781fb1f10f050b1784c09dc1134abde5fa5b19080ad23065b769ea3a9c262df34c0fb56acfee60cd  0125-misc-add-controlled-flo-tabla-discovery-power-sequen.patch
+24ebeb474d1ae67b90dcd8db433067f5789a2470d3ed07ab11bf1fdb8eb4b185d11ca6537fd2efe28990eff553b6263ce2c30ced6c575aad2e91f65453e4c70f  0126-arm-dts-qcom-describe-default-off-flo-tabla-discover.patch
+45c80b581e2a47742a9c81e6bbc2c99b4aa4d76f2de90b15b2195ea30656a9c4c93666f0a7642b4721139ae6983f38afb1034718077a092f7203e91f6968cd41  0127-misc-keep-flo-tabla-power-safe-across-shutdown-error.patch
+523ce7c0231b8329064dc63e7c22eb4659c58cf76186364346273820d31284d17bd427cd849295ffbd9d7abbb65f9788ca470fffcffc5967f9d8953b78c699f4  0128-firmware-qcom-scm-distinguish-pas-start-failure-stages.patch
 "

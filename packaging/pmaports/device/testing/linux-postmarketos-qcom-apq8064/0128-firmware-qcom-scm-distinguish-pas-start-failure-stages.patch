@@ -1,0 +1,43 @@
+From 34e8b15c77ac9e095fa8c46cff1a28a9bb2ee86d Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Wed, 18 Nov 2026 16:32:47 +0100
+Subject: [PATCH] firmware: qcom_scm: distinguish PAS start failure stages
+
+---
+ drivers/firmware/qcom/qcom_scm.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
+index 6b601a4b8..42348ae59 100644
+--- a/drivers/firmware/qcom/qcom_scm.c
++++ b/drivers/firmware/qcom/qcom_scm.c
+@@ -965,14 +965,25 @@ int qcom_scm_pas_auth_and_reset(u32 pas_id)
+ 	struct qcom_scm_res res;
+ 
+ 	ret = qcom_scm_clk_enable();
+-	if (ret)
++	if (ret) {
++		dev_err(__scm->dev, "PAS %u: SCM clock enable failed: %d\n",
++			pas_id, ret);
+ 		return ret;
++	}
+ 
+ 	ret = qcom_scm_bw_enable();
++	if (ret)
++		dev_err(__scm->dev, "PAS %u: SCM bandwidth vote failed: %d\n",
++			pas_id, ret);
+ 	if (ret)
+ 		goto disable_clk;
+ 
+ 	ret = qcom_scm_call(__scm->dev, &desc, &res);
++	if (ret)
++		dev_err(__scm->dev, "PAS %u: SCM call failed: %d\n", pas_id, ret);
++	else if (res.result[0])
++		dev_err(__scm->dev, "PAS %u: firmware status: 0x%llx\n",
++			pas_id, res.result[0]);
+ 	qcom_scm_bw_disable();
+ 
+ disable_clk:
+-- 
+2.56.0
+

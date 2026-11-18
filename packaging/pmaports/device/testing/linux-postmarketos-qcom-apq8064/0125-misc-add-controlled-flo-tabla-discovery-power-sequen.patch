@@ -1,0 +1,582 @@
+From 9a78783186a07d52c2f2bb1f6e2c9f46c5c6ee01 Mon Sep 17 00:00:00 2001
+From: Gianluca Mazza <info@gianlucamazza.it>
+Date: Wed, 18 Nov 2026 02:41:54 +0100
+Subject: [PATCH 120/121] misc: add controlled flo tabla discovery power
+ sequencer
+
+---
+ drivers/misc/Kconfig                    |  12 +
+ drivers/misc/Makefile                   |   3 +
+ drivers/misc/flo_tabla_discovery.c      | 298 ++++++++++++++++++++++++
+ drivers/misc/flo_tabla_discovery.h      |  35 +++
+ drivers/misc/flo_tabla_discovery_test.c | 174 ++++++++++++++
+ 5 files changed, 522 insertions(+)
+ create mode 100644 drivers/misc/flo_tabla_discovery.c
+ create mode 100644 drivers/misc/flo_tabla_discovery.h
+ create mode 100644 drivers/misc/flo_tabla_discovery_test.c
+
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 390256ed9..319c521a6 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -5,6 +5,18 @@
+ 
+ menu "Misc devices"
+ 
++config FLO_TABLA_DISCOVERY
++	tristate "Flo tabla SLIMbus codec discovery"
++	depends on (OF && SLIMBUS && REGULATOR && GPIOLIB) || (KUNIT && COMPILE_TEST)
++	help
++	  Manual, default-off power sequencing to discover the tabla SLIMbus
++	  enumeration address on the ASUS Nexus 7 flo. No audio path is enabled.
++
++config FLO_TABLA_DISCOVERY_TEST
++	tristate "Flo tabla discovery power sequence tests" if !KUNIT_ALL_TESTS
++	depends on KUNIT && FLO_TABLA_DISCOVERY
++	default KUNIT_ALL_TESTS
++
+ config SENSORS_LIS3LV02D
+ 	tristate
+ 	depends on INPUT
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index fed47c767..5b3f75246 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -3,6 +3,9 @@
+ # Makefile for misc devices that really don't fit anywhere else.
+ #
+ 
++obj-$(CONFIG_FLO_TABLA_DISCOVERY) += flo_tabla_discovery.o
++obj-$(CONFIG_FLO_TABLA_DISCOVERY_TEST) += flo_tabla_discovery_test.o
++
+ obj-$(CONFIG_IBM_ASM)		+= ibmasm/
+ obj-$(CONFIG_IBMVMC)		+= ibmvmc.o
+ obj-$(CONFIG_AD525X_DPOT)	+= ad525x_dpot.o
+diff --git a/drivers/misc/flo_tabla_discovery.c b/drivers/misc/flo_tabla_discovery.c
+new file mode 100644
+index 000000000..00b41a57b
+--- /dev/null
++++ b/drivers/misc/flo_tabla_discovery.c
+@@ -0,0 +1,298 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Flo tabla enumeration aid. No sound card or amplifier is registered here. */
++#include <linux/clk.h>
++#include <linux/device.h>
++#include <linux/gpio/consumer.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/of_platform.h>
++#include <linux/platform_device.h>
++#include <linux/pm.h>
++#include <linux/pm_runtime.h>
++#include <linux/regulator/consumer.h>
++#include <linux/delay.h>
++
++#include "flo_tabla_discovery.h"
++
++#define FLO_TABLA_MCLK_HZ 12288000
++
++struct flo_tabla_discovery {
++	struct device *dev;
++	struct device *controller;
++	struct regulator *s4;
++	struct regulator *l25;
++	struct gpio_desc *reset;
++	struct clk *mclk;
++	struct mutex lock;
++	struct flo_tabla_power power;
++};
++
++static int flo_tabla_apply(void *data, enum flo_tabla_action action)
++{
++	struct flo_tabla_discovery *td = data;
++
++	switch (action) {
++	case FLO_TABLA_CONTROLLER_GET:
++		return pm_runtime_resume_and_get(td->controller);
++	case FLO_TABLA_S4_ENABLE:
++		return regulator_enable(td->s4);
++	case FLO_TABLA_L25_ENABLE:
++		return regulator_enable(td->l25);
++	case FLO_TABLA_RESET_ASSERT:
++		return gpiod_set_value_cansleep(td->reset, 1);
++	case FLO_TABLA_RESET_DEASSERT:
++		return gpiod_set_value_cansleep(td->reset, 0);
++	case FLO_TABLA_WAIT_RESET:
++	case FLO_TABLA_WAIT_BOOT:
++		msleep(20);
++		return 0;
++	case FLO_TABLA_MCLK_RATE:
++		return clk_set_rate(td->mclk, FLO_TABLA_MCLK_HZ);
++	case FLO_TABLA_MCLK_ENABLE:
++		return clk_prepare_enable(td->mclk);
++	case FLO_TABLA_MCLK_DISABLE:
++		clk_disable_unprepare(td->mclk);
++		return 0;
++	case FLO_TABLA_L25_DISABLE:
++		return regulator_disable(td->l25);
++	case FLO_TABLA_S4_DISABLE:
++		return regulator_disable(td->s4);
++	case FLO_TABLA_CONTROLLER_PUT:
++		pm_runtime_mark_last_busy(td->controller);
++		pm_runtime_put_autosuspend(td->controller);
++		return 0;
++	}
++	return -EINVAL;
++}
++
++static int flo_tabla_power_off(struct flo_tabla_power *p)
++{
++	int ret, first_error = 0;
++
++	if (!p->controller_on && !p->s4_on && !p->l25_on && !p->mclk_on)
++		return 0;
++
++	ret = p->apply(p->ctx, FLO_TABLA_RESET_ASSERT);
++	if (ret)
++		first_error = ret;
++	if (p->mclk_on) {
++		ret = p->apply(p->ctx, FLO_TABLA_MCLK_DISABLE);
++		if (!ret)
++			p->mclk_on = false;
++		else if (!first_error)
++			first_error = ret;
++	}
++	if (p->l25_on) {
++		ret = p->apply(p->ctx, FLO_TABLA_L25_DISABLE);
++		if (!ret)
++			p->l25_on = false;
++		else if (!first_error)
++			first_error = ret;
++	}
++	if (p->s4_on) {
++		ret = p->apply(p->ctx, FLO_TABLA_S4_DISABLE);
++		if (!ret)
++			p->s4_on = false;
++		else if (!first_error)
++			first_error = ret;
++	}
++	if (p->controller_on) {
++		ret = p->apply(p->ctx, FLO_TABLA_CONTROLLER_PUT);
++		if (!ret)
++			p->controller_on = false;
++		else if (!first_error)
++			first_error = ret;
++	}
++	p->enabled = false;
++	return first_error;
++}
++
++int flo_tabla_power_set(struct flo_tabla_power *p, bool enable)
++{
++	int ret;
++
++	if (!enable)
++		return flo_tabla_power_off(p);
++	if (p->enabled)
++		return 0;
++	if (p->controller_on || p->s4_on || p->l25_on || p->mclk_on)
++		return -EBUSY;
++
++	ret = p->apply(p->ctx, FLO_TABLA_CONTROLLER_GET);
++	if (ret)
++		return ret;
++	p->controller_on = true;
++	ret = p->apply(p->ctx, FLO_TABLA_S4_ENABLE);
++	if (ret)
++		goto unwind;
++	p->s4_on = true;
++	ret = p->apply(p->ctx, FLO_TABLA_L25_ENABLE);
++	if (ret)
++		goto unwind;
++	p->l25_on = true;
++	ret = p->apply(p->ctx, FLO_TABLA_RESET_ASSERT);
++	if (ret)
++		goto unwind;
++	ret = p->apply(p->ctx, FLO_TABLA_WAIT_RESET);
++	if (ret)
++		goto unwind;
++	ret = p->apply(p->ctx, FLO_TABLA_RESET_DEASSERT);
++	if (ret)
++		goto unwind;
++	ret = p->apply(p->ctx, FLO_TABLA_WAIT_BOOT);
++	if (ret)
++		goto unwind;
++	ret = p->apply(p->ctx, FLO_TABLA_MCLK_RATE);
++	if (ret)
++		goto unwind;
++	ret = p->apply(p->ctx, FLO_TABLA_MCLK_ENABLE);
++	if (ret)
++		goto unwind;
++	p->mclk_on = true;
++	p->enabled = true;
++	return 0;
++
++unwind:
++	flo_tabla_power_off(p);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(flo_tabla_power_set);
++
++static ssize_t enabled_show(struct device *dev,
++			    struct device_attribute *attr, char *buf)
++{
++	struct flo_tabla_discovery *td = dev_get_drvdata(dev);
++	bool enabled;
++
++	mutex_lock(&td->lock);
++	enabled = td->power.enabled;
++	mutex_unlock(&td->lock);
++	return sysfs_emit(buf, "%u\n", enabled);
++}
++
++static ssize_t enabled_store(struct device *dev,
++			     struct device_attribute *attr,
++			     const char *buf, size_t count)
++{
++	struct flo_tabla_discovery *td = dev_get_drvdata(dev);
++	bool enable;
++	int ret;
++
++	ret = kstrtobool(buf, &enable);
++	if (ret)
++		return ret;
++	mutex_lock(&td->lock);
++	ret = flo_tabla_power_set(&td->power, enable);
++	mutex_unlock(&td->lock);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_RW(enabled);
++
++static int flo_tabla_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct device_node *node;
++	struct platform_device *controller;
++	struct flo_tabla_discovery *td;
++	int ret;
++
++	node = of_parse_phandle(dev->of_node, "slim-controller", 0);
++	if (!node)
++		return dev_err_probe(dev, -EINVAL, "missing SLIMbus controller\n");
++	controller = of_find_device_by_node(node);
++	of_node_put(node);
++	if (!controller)
++		return -EPROBE_DEFER;
++	if (!device_is_bound(&controller->dev)) {
++		ret = -EPROBE_DEFER;
++		goto put_controller;
++	}
++
++	td = devm_kzalloc(dev, sizeof(*td), GFP_KERNEL);
++	if (!td) {
++		ret = -ENOMEM;
++		goto put_controller;
++	}
++	td->dev = dev;
++	td->controller = &controller->dev;
++	td->s4 = devm_regulator_get(dev, "vdd-1p8");
++	if (IS_ERR(td->s4)) {
++		ret = dev_err_probe(dev, PTR_ERR(td->s4), "S4 supply\n");
++		goto put_controller;
++	}
++	td->l25 = devm_regulator_get(dev, "vdd-1p25");
++	if (IS_ERR(td->l25)) {
++		ret = dev_err_probe(dev, PTR_ERR(td->l25), "L25 supply\n");
++		goto put_controller;
++	}
++	td->reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(td->reset)) {
++		ret = dev_err_probe(dev, PTR_ERR(td->reset), "codec reset\n");
++		goto put_controller;
++	}
++	td->mclk = devm_clk_get(dev, "mclk");
++	if (IS_ERR(td->mclk)) {
++		ret = dev_err_probe(dev, PTR_ERR(td->mclk), "codec MCLK\n");
++		goto put_controller;
++	}
++	if (!device_link_add(dev, td->controller, DL_FLAG_AUTOREMOVE_CONSUMER)) {
++		ret = -ENOMEM;
++		goto put_controller;
++	}
++	mutex_init(&td->lock);
++	td->power.apply = flo_tabla_apply;
++	td->power.ctx = td;
++	platform_set_drvdata(pdev, td);
++	ret = device_create_file(dev, &dev_attr_enabled);
++	if (ret)
++		goto put_controller;
++	ret = 0;
++
++put_controller:
++	put_device(&controller->dev);
++	return ret;
++}
++
++static void flo_tabla_remove(struct platform_device *pdev)
++{
++	struct flo_tabla_discovery *td = platform_get_drvdata(pdev);
++
++	device_remove_file(&pdev->dev, &dev_attr_enabled);
++	mutex_lock(&td->lock);
++	flo_tabla_power_set(&td->power, false);
++	mutex_unlock(&td->lock);
++}
++
++static int flo_tabla_suspend(struct device *dev)
++{
++	struct flo_tabla_discovery *td = dev_get_drvdata(dev);
++	int ret;
++
++	mutex_lock(&td->lock);
++	ret = flo_tabla_power_set(&td->power, false);
++	mutex_unlock(&td->lock);
++	return ret;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(flo_tabla_pm_ops, flo_tabla_suspend, NULL);
++
++static const struct of_device_id flo_tabla_of_match[] = {
++	{ .compatible = "asus,flo-tabla-discovery" },
++	{}
++};
++MODULE_DEVICE_TABLE(of, flo_tabla_of_match);
++
++static struct platform_driver flo_tabla_driver = {
++	.probe = flo_tabla_probe,
++	.remove = flo_tabla_remove,
++	.driver = {
++		.name = "flo-tabla-discovery",
++		.of_match_table = flo_tabla_of_match,
++		.pm = pm_sleep_ptr(&flo_tabla_pm_ops),
++	},
++};
++module_platform_driver(flo_tabla_driver);
++
++MODULE_DESCRIPTION("Flo tabla SLIMbus codec discovery power sequencer");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/misc/flo_tabla_discovery.h b/drivers/misc/flo_tabla_discovery.h
+new file mode 100644
+index 000000000..647a9d121
+--- /dev/null
++++ b/drivers/misc/flo_tabla_discovery.h
+@@ -0,0 +1,35 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _FLO_TABLA_DISCOVERY_H
++#define _FLO_TABLA_DISCOVERY_H
++
++#include <linux/types.h>
++
++enum flo_tabla_action {
++	FLO_TABLA_CONTROLLER_GET,
++	FLO_TABLA_S4_ENABLE,
++	FLO_TABLA_L25_ENABLE,
++	FLO_TABLA_RESET_ASSERT,
++	FLO_TABLA_RESET_DEASSERT,
++	FLO_TABLA_WAIT_RESET,
++	FLO_TABLA_WAIT_BOOT,
++	FLO_TABLA_MCLK_RATE,
++	FLO_TABLA_MCLK_ENABLE,
++	FLO_TABLA_MCLK_DISABLE,
++	FLO_TABLA_L25_DISABLE,
++	FLO_TABLA_S4_DISABLE,
++	FLO_TABLA_CONTROLLER_PUT,
++};
++
++struct flo_tabla_power {
++	int (*apply)(void *ctx, enum flo_tabla_action action);
++	void *ctx;
++	bool enabled;
++	bool controller_on;
++	bool s4_on;
++	bool l25_on;
++	bool mclk_on;
++};
++
++int flo_tabla_power_set(struct flo_tabla_power *power, bool enable);
++
++#endif
+diff --git a/drivers/misc/flo_tabla_discovery_test.c b/drivers/misc/flo_tabla_discovery_test.c
+new file mode 100644
+index 000000000..98f5d9c5b
+--- /dev/null
++++ b/drivers/misc/flo_tabla_discovery_test.c
+@@ -0,0 +1,174 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <kunit/test.h>
++#include "flo_tabla_discovery.h"
++
++struct tabla_test_context {
++	struct flo_tabla_power power;
++	enum flo_tabla_action actions[64];
++	int count;
++	int fail_at;
++	int fail_error;
++	bool controller_on;
++	bool s4_on;
++	bool l25_on;
++	bool mclk_on;
++	bool reset_asserted;
++};
++
++static int tabla_test_apply(void *data, enum flo_tabla_action action)
++{
++	struct tabla_test_context *ctx = data;
++
++	ctx->actions[ctx->count++] = action;
++	if (action == ctx->fail_at)
++		return ctx->fail_error;
++	switch (action) {
++	case FLO_TABLA_CONTROLLER_GET:
++		ctx->controller_on = true;
++		break;
++	case FLO_TABLA_CONTROLLER_PUT:
++		ctx->controller_on = false;
++		break;
++	case FLO_TABLA_S4_ENABLE:
++		ctx->s4_on = true;
++		break;
++	case FLO_TABLA_S4_DISABLE:
++		ctx->s4_on = false;
++		break;
++	case FLO_TABLA_L25_ENABLE:
++		ctx->l25_on = true;
++		break;
++	case FLO_TABLA_L25_DISABLE:
++		ctx->l25_on = false;
++		break;
++	case FLO_TABLA_MCLK_ENABLE:
++		ctx->mclk_on = true;
++		break;
++	case FLO_TABLA_MCLK_DISABLE:
++		ctx->mclk_on = false;
++		break;
++	case FLO_TABLA_RESET_ASSERT:
++		ctx->reset_asserted = true;
++		break;
++	case FLO_TABLA_RESET_DEASSERT:
++		ctx->reset_asserted = false;
++		break;
++	default:
++		break;
++	}
++	return 0;
++}
++
++static void tabla_test_init(struct tabla_test_context *ctx)
++{
++	memset(ctx, 0, sizeof(*ctx));
++	ctx->fail_at = -1;
++	ctx->fail_error = -EIO;
++	ctx->power.apply = tabla_test_apply;
++	ctx->power.ctx = ctx;
++}
++
++static void tabla_test_off(struct kunit *test, struct tabla_test_context *ctx)
++{
++	KUNIT_EXPECT_FALSE(test, ctx->power.enabled);
++	KUNIT_EXPECT_FALSE(test, ctx->power.controller_on);
++	KUNIT_EXPECT_FALSE(test, ctx->power.s4_on);
++	KUNIT_EXPECT_FALSE(test, ctx->power.l25_on);
++	KUNIT_EXPECT_FALSE(test, ctx->power.mclk_on);
++	KUNIT_EXPECT_FALSE(test, ctx->controller_on);
++	KUNIT_EXPECT_FALSE(test, ctx->s4_on);
++	KUNIT_EXPECT_FALSE(test, ctx->l25_on);
++	KUNIT_EXPECT_FALSE(test, ctx->mclk_on);
++	KUNIT_EXPECT_TRUE(test, ctx->reset_asserted);
++}
++
++static void tabla_enable_disable_is_balanced(struct kunit *test)
++{
++	struct tabla_test_context ctx;
++	int first_on;
++
++	tabla_test_init(&ctx);
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, true), 0);
++	KUNIT_EXPECT_TRUE(test, ctx.power.enabled);
++	KUNIT_EXPECT_TRUE(test, ctx.controller_on);
++	KUNIT_EXPECT_TRUE(test, ctx.l25_on);
++	KUNIT_EXPECT_TRUE(test, ctx.mclk_on);
++	first_on = ctx.count;
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, true), 0);
++	KUNIT_EXPECT_EQ(test, ctx.count, first_on);
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, false), 0);
++	tabla_test_off(test, &ctx);
++	KUNIT_EXPECT_EQ(test, ctx.actions[ctx.count - 1], FLO_TABLA_CONTROLLER_PUT);
++	first_on = ctx.count;
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, false), 0);
++	KUNIT_EXPECT_EQ(test, ctx.count, first_on);
++}
++
++static void tabla_each_enable_failure_unwinds(struct kunit *test)
++{
++	static const enum flo_tabla_action failures[] = {
++		FLO_TABLA_CONTROLLER_GET, FLO_TABLA_S4_ENABLE,
++		FLO_TABLA_L25_ENABLE, FLO_TABLA_RESET_ASSERT,
++		FLO_TABLA_WAIT_RESET, FLO_TABLA_RESET_DEASSERT,
++		FLO_TABLA_WAIT_BOOT, FLO_TABLA_MCLK_RATE,
++		FLO_TABLA_MCLK_ENABLE,
++	};
++	struct tabla_test_context ctx;
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(failures); i++) {
++		tabla_test_init(&ctx);
++		ctx.fail_at = failures[i];
++		/* Probe holds reset asserted before the first sysfs write. */
++		ctx.reset_asserted = true;
++		KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, true), -EIO);
++		tabla_test_off(test, &ctx);
++		if (failures[i] > FLO_TABLA_CONTROLLER_GET)
++			KUNIT_EXPECT_EQ(test, ctx.actions[ctx.count - 1],
++					FLO_TABLA_CONTROLLER_PUT);
++	}
++}
++
++static void tabla_unbound_controller_never_powers_codec(struct kunit *test)
++{
++	struct tabla_test_context ctx;
++
++	tabla_test_init(&ctx);
++	ctx.reset_asserted = true;
++	ctx.fail_at = FLO_TABLA_CONTROLLER_GET;
++	ctx.fail_error = -EPROBE_DEFER;
++	KUNIT_EXPECT_EQ(test, flo_tabla_power_set(&ctx.power, true),
++			-EPROBE_DEFER);
++	KUNIT_EXPECT_EQ(test, ctx.count, 1);
++	tabla_test_off(test, &ctx);
++}
++
++static void tabla_suspend_and_remove_power_off(struct kunit *test)
++{
++	struct tabla_test_context ctx;
++
++	tabla_test_init(&ctx);
++	ctx.reset_asserted = true;
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, true), 0);
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, false), 0);
++	tabla_test_off(test, &ctx);
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, true), 0);
++	KUNIT_ASSERT_EQ(test, flo_tabla_power_set(&ctx.power, false), 0);
++	tabla_test_off(test, &ctx);
++}
++
++static struct kunit_case tabla_cases[] = {
++	KUNIT_CASE(tabla_enable_disable_is_balanced),
++	KUNIT_CASE(tabla_each_enable_failure_unwinds),
++	KUNIT_CASE(tabla_unbound_controller_never_powers_codec),
++	KUNIT_CASE(tabla_suspend_and_remove_power_off),
++	{}
++};
++
++static struct kunit_suite tabla_suite = {
++	.name = "flo-tabla-discovery",
++	.test_cases = tabla_cases,
++};
++
++kunit_test_suite(tabla_suite);
++MODULE_LICENSE("GPL");
+-- 
+2.56.0
+

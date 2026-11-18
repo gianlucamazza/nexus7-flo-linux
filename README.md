@@ -1,16 +1,34 @@
 # Omarchy su Nexus 7 2013 Wi-Fi
 
 Laboratorio per ASUS/Google Nexus 7 (2013), `flo` / `asus-flo`, ARMv7, 2 GB RAM.
-Preparato il 2026-11-08. Bootloader sbloccato secondo il proprietario;
-recovery presente ma tipo/versione e partizioni ancora da verificare.
+Avviato il 2026-11-08. Il tablet esegue ora postmarketOS con kernel
+APQ8064, Hyprland e [flo-shell](https://github.com/gianlucamazza/flo-shell).
+La recovery USB e i backup di boot sono stati usati e verificati durante
+le prove del kernel.
 
 ## Obiettivo
 
 Avviare Linux nativo, verificarne le periferiche e costruire un desktop ispirato
 ad Omarchy. Il port completo di Omarchy resta un obiettivo da valutare:
 ARMv7 non è AArch64 e i pacchetti ARM64 non funzionano su questo SoC.
-La base iniziale scelta è Nura/postmarketOS, dispositivo `asus-flo`.
-Questo repository non contiene ancora un'immagine Linux costruita o collaudata.
+La base scelta è postmarketOS, dispositivo `asus-flo`. Questo repository
+pubblica sorgenti, ricetta del kernel e risultati delle prove; gli APK,
+i backup del tablet e le chiavi diagnostiche restano fuori dal repository.
+
+## Stato corrente (18 novembre 2026)
+
+Sul tablet è installato il kernel diagnostico r48. Tre avvii consecutivi
+con alimentatore da parete hanno portato Wi-Fi e greeter online. Il kernel
+aggiunge log per distinguere le fasi di un errore intermittente WCNSS;
+non ne contiene ancora la correzione. La ricarica DCP con display acceso
+è stata misurata positiva su r47. Il cambio di luminosità causa ancora
+un difetto fisico DSI; audio e sensori non sono ancora funzionanti.
+
+Per risultati e limiti di verifica, vedi
+[l'analisi corrente](docs/hw/ANALYSIS-20261118.md). La
+[ricetta pmaports r48](packaging/pmaports/README.md) corrisponde al
+pacchetto installato; il codice kernel è nel repository
+[`linux-flo`](https://github.com/gianlucamazza/linux-flo/tree/flo/wcnss-pas-diag-r48).
 
 ## Comandi pronti
 
@@ -35,7 +53,7 @@ Gli strumenti Android ufficiali sono locali in `tools/platform-tools/`.
 in `config/sources.lock.json`. Kpartx è estratto localmente in `tools/host/usr/bin/`; la firma del pacchetto è verificata. Non sono stati installati pacchetti di sistema.
 La configurazione pmbootstrap e il suo percorso di lavoro restano nel progetto.
 
-## Percorso
+## Percorso iniziale
 
 1. Identificare ROM, recovery, batteria, bootloader e mappa delle partizioni.
 2. Salvare i dati e, dalla recovery, i backup di boot/recovery e configurazione.
@@ -44,7 +62,7 @@ La configurazione pmbootstrap e il suo percorso di lavoro restano nel progetto.
 5. Verificare display, touch, USB, Wi-Fi e alimentazione sul dispositivo reale.
 6. Provare Sway/Sxmo e misurare GPU/RAM; adattare poi l'esperienza Omarchy.
 
-Vedi [stato](docs/STATUS.md), [procedura](docs/FIRST-BOOT.md),
+Vedi [stato](docs/STATUS.md), [procedura storica](docs/FIRST-BOOT.md),
 [scelte tecniche](docs/ARCHITECTURE.md), [fonti](docs/SOURCES.md).
 
 ## Struttura
