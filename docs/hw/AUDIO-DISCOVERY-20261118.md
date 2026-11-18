@@ -49,6 +49,24 @@ driver riconosce solo product code `0x60`. Un DTS che dichiari soltanto
 
 ## Esperimento nativo richiesto
 
+La preparazione host è su rami diagnostici separati: kernel
+`flo/audio-discovery` ai commit `9a7878318` e `6c1990d8c`, e pacchetto
+`flo/audio-discovery-package`. Il driver espone `enabled` con valore
+iniziale `0`, asserisce reset al probe e bilancia il riferimento runtime
+PM, S4, L25 e MCLK in spegnimento o errore. KUnit passa 4/4; l'oggetto
+ARM compila; il DTB flo compilato passa 3/3 controlli su supply,
+GPIO34, MCLK, pinctrl e assenza di una route audio. S4 è condiviso e
+marcato `regulator-always-on`: disabilitare il suo consumer rilascia il
+riferimento della discovery, non spegne fisicamente quella rail.
+Il pacchetto `7.2-r35` è stato costruito da zero: contiene le tre opzioni
+kernel abilitate e il DTB estratto dall'APK passa 3/3 controlli. SHA256
+`e0c775184cc266972752d6426053b7c5efecb7ad8d6650edda58a6d8e5fc096d`.
+È copiato in `/var/tmp/linux-postmarketos-qcom-apq8064-audio-discovery-r35.apk`
+e la simulazione `apk add --simulate --allow-untrusted` ha previsto il
+downgrade del kernel installato senza dipendenze mancanti. Il pacchetto
+non è installato. L'enumerazione del codec non è ancora stata osservata
+sul tablet; il test nativo richiede recovery presidiata.
+
 1. Preparare un kernel di discovery isolato che abiliti controller,
    pinctrl e alimentazione/reset/MCLK del codec, senza sound card né GPIO
    degli amplificatori. La sequenza deve essere esplicita, reversibile e
