@@ -15,10 +15,12 @@ based on postmarketOS (renamed [Nura](https://nura.eco) in September 2026).
 | [`flo-shell`](https://github.com/gianlucamazza/flo-shell) | touch shell, greeter and session for the tablet (Quickshell + Hyprland) |
 | [`linux-flo`](https://github.com/gianlucamazza/linux-flo) | kernel branches on top of [apq8064-mainline/linux](https://github.com/apq8064-mainline/linux) |
 
-## Hardware status
+## Hardware status and roadmap
 
-See [`docs/hw/MATRIX.md`](docs/hw/MATRIX.md). Only results measured on a real
-device are listed there; anything else is marked as untested.
+- [`docs/HARDWARE.md`](docs/HARDWARE.md): what works, per component, with links
+  to the evidence. Anything not tested on the tablet is marked untested.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md): ordered milestones from the open issues.
+- [`docs/hw/MATRIX.md`](docs/hw/MATRIX.md): vendor-source review per peripheral.
 
 ## Quick start (host)
 
