@@ -85,3 +85,35 @@ describe the Skia compositor and damage-aware rendering already present in
 2.54.2. The [WebKitGTK profiling notes](https://webkitgtk.org/2025/11/26/webkitgtk-2.50.html)
 describe Sysprof marks and counters, which require a complete process trace
 for useful attribution.
+
+## Online research, 2026-11-19
+
+The current Alpine edge/community armv7 `APKINDEX` still lists
+`webkit2gtk-6.0` 2.54.2-r2 and Epiphany 50.6-r0. The tablet was unreachable
+over Wi-Fi when this was checked, so installed versions were not refreshed.
+The [WebKitGTK 2.54.3 release notes](https://webkitgtk.org/2026/11/18/webkitgtk2.54.3-released.html)
+identify a prewarmed Web-process fix, but do not claim a remedy for this
+page's post-paint CPU time.
+
+The [2.54 architecture notes](https://webkitgtk.org/2026/09/16/webkitgtk-2.54-highlights.html)
+show that Skia composition, damage-aware repainting, and mimalloc on 32-bit
+ARM are already in our version. These are not missing switches to enable.
+The [compositor author's guidance](https://blogs.igalia.com/carlosgc/2026/09/21/skia-compositor-for-wpe-webkit-and-webkitgtk/)
+does provide a useful diagnostic A/B: run one isolated browser instance with
+`WEBKIT_USE_SKIA_FOR_COMPOSITION=0` and compare it with the default. This
+selects the older TextureMapper compositor in 2.54. Use it only to detect a
+Skia regression; TextureMapper is being retired and is not a durable local
+performance setting. An [actual Skia backdrop-filter regression](https://bugs.webkit.org/show_bug.cgi?id=327701)
+was fixed and backported into 2.54.2, so it does not justify reverting our
+installed package or attributing this GitHub page to that bug.
+
+WebKit's [graphics diagnostics](https://blogs.igalia.com/carlosgc/2024/09/27/graphics-improvements-in-webkitgtk-and-wpewebkit-2-46/)
+document `webkit://gpu/stdout`, which can report the active renderer and
+threaded painting backend. Capture it from an isolated browser process before
+considering any graphics change; the tablet's existing GTK GL hang makes an
+unmeasured GPU toggle particularly risky. [WebKit's contributor notes](https://docs.webkit.org/Other/Contributor%20Meetings/ContributorMeeting2025.html)
+describe ARMv7 Sysprof/samply support and JIT-aware profiling. Alpine armv7
+currently packages Sysprof and WebKitGTK debug symbols, but not `samply`.
+The next profiling attempt should attach to the actual Web process and verify
+that samples or marks span the entire navigation before interpreting a flame
+graph. Simultaneously log CPU frequency and temperature to check throttling.
