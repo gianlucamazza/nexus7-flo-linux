@@ -37,10 +37,14 @@ class AuditTests(unittest.TestCase):
         image(self.root)
         self.iomem = self.root / 'iomem'
         self.iomem.write_text('80200000-8effffff : System RAM\n8f700000-fffffffe : System RAM\n')
+        self.dt_reserved = self.root / 'reserved-memory'
+        self.dt_reserved.mkdir()
 
     def run_audit(self):
         return subprocess.run([sys.executable, str(SCRIPT), '--firmware-dir', str(self.root),
-                               '--iomem', str(self.iomem)], capture_output=True, text=True)
+                               '--iomem', str(self.iomem),
+                               '--dt-reserved-memory', str(self.dt_reserved)],
+                              capture_output=True, text=True)
 
     def result(self):
         run = self.run_audit()
@@ -49,6 +53,7 @@ class AuditTests(unittest.TestCase):
 
     def test_reports_physical_load_addresses_and_skips_hash(self):
         result = self.result()
+        self.assertEqual(result['schema_version'], 2)
         self.assertEqual([s['physical_address'] for s in result['load_segments']], [0x12000000, 0x8fe00000])
         self.assertEqual(result['architecture'], 'ARM ELF32 little-endian')
 
@@ -60,6 +65,28 @@ class AuditTests(unittest.TestCase):
     def test_no_overlap_is_not_proof_of_reservation(self):
         self.iomem.write_text('80200000-8effffff : System RAM\n')
         self.assertEqual(self.result()['ddr_memory_check'], 'no-overlap-reservation-unverified')
+
+    def test_exact_dt_reservation_needs_no_map_and_no_ram_overlap(self):
+        node = self.dt_reserved / 'dsps@8fe00000'
+        node.mkdir()
+        (node / 'reg').write_bytes(struct.pack('>II', 0x8fe00000, 0x100000))
+        (node / 'no-map').touch()
+        result = self.result()
+        self.assertEqual(result['ddr_dt_reservation'], 'exact-no-map')
+        self.assertEqual(result['ddr_memory_check'], 'overlaps-system-ram')
+        self.iomem.write_text('80200000-8effffff : System RAM\n')
+        self.assertEqual(self.result()['ddr_dt_reservation'], 'exact-no-map')
+
+    def test_missing_or_wrong_dt_reservation_is_not_exact(self):
+        self.assertEqual(self.result()['ddr_dt_reservation'], 'missing')
+        node = self.dt_reserved / 'dsps@8fe00000'
+        node.mkdir()
+        (node / 'reg').write_bytes(struct.pack('>II', 0x8fe00000, 0x80000))
+        (node / 'no-map').touch()
+        self.assertEqual(self.result()['ddr_dt_reservation'], 'invalid')
+        (node / 'reg').write_bytes(struct.pack('>II', 0x8fe00000, 0x100000))
+        (node / 'no-map').unlink()
+        self.assertEqual(self.result()['ddr_dt_reservation'], 'invalid')
 
     def test_missing_or_redacted_iomem_stays_unknown(self):
         for text in ['', '00000000-00000000 : System RAM\n']:
@@ -140,9 +167,11 @@ class AuditTests(unittest.TestCase):
 
     def test_failure_does_not_modify_inputs(self):
         (self.root / 'dsps.b02').write_bytes(b'bad')
-        before = {p.name: p.read_bytes() for p in self.root.iterdir()}
+        before = {str(p.relative_to(self.root)): p.read_bytes()
+                  for p in self.root.rglob('*') if p.is_file()}
         self.assertEqual(self.run_audit().returncode, 1)
-        self.assertEqual({p.name: p.read_bytes() for p in self.root.iterdir()}, before)
+        self.assertEqual({str(p.relative_to(self.root)): p.read_bytes()
+                          for p in self.root.rglob('*') if p.is_file()}, before)
 
 
 if __name__ == '__main__':

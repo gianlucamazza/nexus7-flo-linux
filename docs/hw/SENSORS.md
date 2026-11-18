@@ -26,6 +26,11 @@ Exit 0 means the supported split ELF structure and blob lengths validate;
 exit 1 means invalid or unreadable firmware. **Exit 0 does not authorize boot.**
 Inspect `ddr_memory_check` separately. Even `no-overlap-reservation-unverified`
 does not prove a DT carveout exists. Missing/redacted iomem produces `unknown`.
+Schema 2 also reports `ddr_dt_reservation`: `exact-no-map` requires the live
+`dsps@8fe00000` node to contain the exact 1 MiB big-endian `reg` and a
+`no-map` property. This is an independent check; it cannot override a
+`ddr_memory_check` of `overlaps-system-ram` or `unknown`. Neither field alone
+authorizes starting the remote processor.
 Hashes identify inputs; this tool does not authenticate Qualcomm signatures or
 compare payloads against an independently trusted manifest. No network access,
 I2C probes, mounts or hardware writes are performed by the tool.
@@ -36,6 +41,10 @@ It reports `overlaps-system-ram`. It was obtained by running the script through
 SSH standard input over Wi-Fi, without installing a daemon or changing boot.
 The tablet reported `7.2.0-postmarketos-qcom-apq8064 #24`, and its only listed
 remoteproc was `3200800.riva-pil`, running. No IIO device was listed.
+Re-running the schema-2 audit on the stable r29 boot after the 18 November
+cable reconnect reports `ddr_dt_reservation=missing` and
+`ddr_memory_check=overlaps-system-ram`. This is the expected unsafe baseline
+against which the r32 boot will be compared; DSPS was not started.
 
 ## Primary-source baseline
 

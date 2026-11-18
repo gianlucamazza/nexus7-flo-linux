@@ -83,7 +83,23 @@ def memory_check(iomem):
     return ('overlaps-system-ram' if overlap else 'no-overlap-reservation-unverified'), overlap
 
 
-def audit(firmware_dir, iomem):
+def dt_reservation_check(reserved_memory):
+    """Inspect the live DT property; this alone does not prove memory safety."""
+    node = reserved_memory / 'dsps@8fe00000'
+    if not node.exists():
+        return 'missing'
+    try:
+        reg = (node / 'reg').read_bytes()
+        no_map = (node / 'no-map').is_file()
+    except OSError:
+        return 'unknown'
+    if len(reg) != 8 or not no_map:
+        return 'invalid'
+    return ('exact-no-map' if struct.unpack('>II', reg) ==
+            (0x8fe00000, 0x100000) else 'invalid')
+
+
+def audit(firmware_dir, iomem, dt_reserved_memory):
     """Return structural validation and evidence, without changing any inputs."""
     files = {}
 
@@ -103,8 +119,9 @@ def audit(firmware_dir, iomem):
         if len(read(name)) != segment['file_size']:
             raise ValueError(f'{name}: segment size differs from ELF program header')
     state, overlap = memory_check(iomem)
-    return {'schema_version': 1, 'architecture': 'ARM ELF32 little-endian',
+    return {'schema_version': 2, 'architecture': 'ARM ELF32 little-endian',
             'files': files, 'load_segments': loads, 'ddr_memory_check': state,
+            'ddr_dt_reservation': dt_reservation_check(dt_reserved_memory),
             'overlapping_system_ram': overlap,
             'scope': 'Structural validation only; not signature verification or boot authorization.'}
 
@@ -113,9 +130,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--firmware-dir', type=Path, default=Path('/lib/firmware/postmarketos'))
     parser.add_argument('--iomem', type=Path, default=Path('/proc/iomem'))
+    parser.add_argument('--dt-reserved-memory', type=Path,
+                        default=Path('/sys/firmware/devicetree/base/reserved-memory'))
     args = parser.parse_args()
     try:
-        result = audit(args.firmware_dir, args.iomem)
+        result = audit(args.firmware_dir, args.iomem, args.dt_reserved_memory)
     except (OSError, ValueError) as error:
         print(f'flo-sensor-audit: {error}', file=sys.stderr)
         return 1
