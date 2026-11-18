@@ -112,6 +112,11 @@ maps `/dev/smd_sns_dsps` to channel `SENSOR` on `SMD_APPS_DSPS` edge 3.
 This independently matches the `SENSOR` string in the firmware. It is the
 SMD packet transport, not a QRTR service name. The r32 DT describes edge 3,
 but channel creation and packet exchange have not been observed on flo.
+The [AOSP flo proprietary-file manifest](https://android.googlesource.com/device/asus/flo/+/4ffa22bb4af373abff09b8c3423c67235f8e132d/proprietary-blobs.txt)
+also lists `sensors.qcom`, `sensors.msm8960.so`, `sns_dsps_tc0001` and
+`sns_smr_loopback_test` for this device. That is device-specific evidence
+for the original userspace stack and a loopback diagnostic, but the
+manifest does not disclose their packet layout or the installed sensor ID.
 
 An open Qualcomm sensor daemon source snapshot at
 [`e0666c3`](https://github.com/sethsong90/vendor_qcom/tree/e0666c398903d38e72aeda7042ec2836cd3dba68/sensors/dsps)
