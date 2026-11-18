@@ -3,8 +3,8 @@
 The running tablet has `gnome-control-center 51.1-r0`, `gtk4.0 4.24.1-r0`
 and `mesa 26.3.0-r0` on armv7. Two `gnome-control-center` SIGSEGV dumps from
 16 November end at the same `libgtk-4.so.1 + 0x41b1bc` offset (PIDs 2498 and
-2420, at 11:43 and 14:53 CET). Two later SIGTRAP dumps are separate events;
-the available journal does not establish that they share the same cause.
+2420, at 11:43 and 14:53 CET). Two later SIGTRAP dumps share a fatal-log
+abort path, but the triggering message is not in the retained journal.
 Hyprland's SIGABRT at 16:47 is also a separate crash.
 
 The 14:53 journal, immediately before PID 2420 crashed, records three
@@ -44,9 +44,35 @@ The copied core and debug package were extracted only into a private temporary
 directory on the host and removed when GDB finished. No process memory or
 firmware payload was committed.
 
+## The two later SIGTRAP events
+
+The 20:43 and 20:44 cores (PIDs 1040 and 1153) both report `SIGTRAP` with
+`SI_TKILL`. Their PCs map to the same `ld-musl-armhf.so.1` offset
+`0x4717a`; the next frame is in the musl `raise()` path. Recovering the
+saved return address from the first core and resolving it against the
+exact [`gnome-control-center-dbg 51.1-r0`](https://pkgs.alpinelinux.org/package/edge/community/armv7/gnome-control-center-dbg)
+package identifies `_g_log_abort()` at `shell/cc-log.c:71`. The installed
+executable and debug file share build ID
+`b6166de35196765e59f8334e64d7e013ef96bc71`. The
+[GNOME 51.1 logging source](https://gitlab.gnome.org/GNOME/gnome-control-center/-/raw/51.1/shell/cc-log.c)
+calls this path for a fatal log message or error. Both cores also contain
+`GSK_RENDERER=cairo`, which places them in the separate Cairo renderer
+experiment. A search of the core memory found no `G_DEBUG=` value, but
+does not prove that every environment variable was retained.
+
+The journal around both traps shows repeated portal dependency failures
+because the graphical session was inactive, but it does not contain the
+fatal message printed by `cc_log_write()`. Thus the exact log condition
+that triggered the traps is still unknown, and those portal messages
+cannot yet be assigned as its cause. The SIGTRAPs must not be counted as
+additional reproductions of the GTK null-GL-context SIGSEGV. Core copies
+and binaries used for this analysis were held in private temporary
+directories and removed after symbolization.
+
 Next investigation: reproduce with a small GTK4 GL surface on the tablet
 while power and physical recovery are stable; collect the *first* EGL/GDK/Mesa
 error and kernel GPU trace, not just the final SIGSEGV. Compare the same
-application under GTK's other supported renderer as a diagnostic A/B, then
+application under GTK's other supported renderer as a diagnostic A/B with
+stderr captured for both runs, then
 fix the failing GL context path or report a minimal GTK null-context bug with
 the symbolized stack. A renderer switch alone would not close this issue.
