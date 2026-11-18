@@ -4,7 +4,7 @@ The running tablet has `gnome-control-center 51.1-r0`, `gtk4.0 4.24.1-r0`
 and `mesa 26.3.0-r0` on armv7. Two `gnome-control-center` SIGSEGV dumps from
 16 November end at the same `libgtk-4.so.1 + 0x41b1bc` offset (PIDs 2498 and
 2420, at 11:43 and 14:53 CET). Two later SIGTRAP dumps share a fatal-log
-abort path, but the triggering message is not in the retained journal.
+abort path caused by a missing GSettings schema, as established below.
 Hyprland's SIGABRT at 16:47 is also a separate crash.
 
 The 14:53 journal, immediately before PID 2420 crashed, records three
@@ -60,14 +60,24 @@ calls this path for a fatal log message or error. Both cores also contain
 experiment. A search of the core memory found no `G_DEBUG=` value, but
 does not prove that every environment variable was retained.
 
-The journal around both traps shows repeated portal dependency failures
-because the graphical session was inactive, but it does not contain the
-fatal message printed by `cc_log_write()`. Thus the exact log condition
-that triggered the traps is still unknown, and those portal messages
-cannot yet be assigned as its cause. The SIGTRAPs must not be counted as
-additional reproductions of the GTK null-GL-context SIGSEGV. Core copies
-and binaries used for this analysis were held in private temporary
-directories and removed after symbolization.
+The fatal message remains in each core's log buffer, even though it was
+not retained in the journal. Both say:
+
+```text
+GLib-GIO: ERROR: Settings schema 'org.gnome.settings-daemon.plugins.color' is not installed
+```
+
+The journal's concurrent portal dependency failures reflect an inactive
+graphical session; they do not explain this trap. The package log records
+`apk add gnome-settings-daemon` at 20:44:37 CET, after the second trap.
+The resolved package `gnome-settings-daemon-mobile-999948.0-r3` owns
+`org.gnome.settings-daemon.plugins.color.gschema.xml`. On the running tablet,
+`gsettings list-schemas` now includes the schema and there are no newer
+Settings cores. This proves the missing-schema condition is gone, though
+it does not replace a fresh Settings launch test. The SIGTRAPs must not be
+counted as additional reproductions of the GTK null-GL-context SIGSEGV.
+Core copies and binaries used for this analysis were held in private
+temporary directories and removed after symbolization.
 
 Next investigation: reproduce with a small GTK4 GL surface on the tablet
 while power and physical recovery are stable; collect the *first* EGL/GDK/Mesa
