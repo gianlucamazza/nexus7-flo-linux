@@ -31,7 +31,10 @@ EVENTS = (
     "irq/irq_handler_entry",
     "irq/irq_handler_exit",
 )
-OPTIONAL_EVENTS = ("drm_msm_dsi/msm_dsi_error_reg",)
+OPTIONAL_EVENTS = (
+    "drm_msm_dsi/msm_dsi_error_reg",
+    "drm_msm_dsi/msm_dsi_phase",
+)
 IRQ_NAMES = ("dsi_isr", "msm")
 
 
