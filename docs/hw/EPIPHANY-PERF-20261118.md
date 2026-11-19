@@ -117,3 +117,22 @@ currently packages Sysprof and WebKitGTK debug symbols, but not `samply`.
 The next profiling attempt should attach to the actual Web process and verify
 that samples or marks span the entire navigation before interpreting a flame
 graph. Simultaneously log CPU frequency and temperature to check throttling.
+
+## Live graphics inventory, 2026-11-19
+
+Wi-Fi returned and the tablet was unlocked, at 100% battery with the power
+controller reporting `Full` and positive current. After `apk update`, Alpine
+armv7 still offered Epiphany 50.6-r0 and WebKitGTK 2.54.2-r2; 2.54.3 was not
+available for installation. An isolated MiniBrowser `webkit://gpu/stdout`
+probe reported Wayland at 600×960 logical pixels, scale 2, 60 Hz; WebKitGTK
+2.54.2; Mesa 26.3.0 freedreno FD320; OpenGL ES 3.0; DMA-BUF XR24; and **GPU
+threaded rendering with two threads**. `GSK_RENDERER=cairo` applies to the GTK
+shell and does not mean that WebKit's web view is software-only. The GPU page
+does not expose the active compositor name; Skia remains the 2.54 default
+unless a process-local override is used.
+
+Four CPU frequency policies expose `scaling_cur_freq` and `scaling_max_freq`.
+The thermal zones are `bq27541-0` and `cpu0-thermal` through
+`cpu3-thermal`. Before the benchmark the CPU policy maximum was 1.512 GHz;
+the CPU zones read 40–47 °C. These are starting values, not load results.
+The probe browser and its temporary profile were closed and removed.
