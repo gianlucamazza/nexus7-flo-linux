@@ -1,17 +1,23 @@
 # Flo brightness regression: shell permissions and panel protocol
 
-## Panel operating mode: source correction (2026-11-18)
+## Panel operating mode: corrected source comparison (2026-11-19)
 
-The original [JDI panel submission](https://lkml.iu.edu/hypermail/linux/kernel/1606.3/02884.html)
-identifies LT070ME05000 in the Nexus 7 2013 as a **video mode** panel. It
-cites vendor `dsi-panel-jdi-dualmipi1-video.dtsi`, labels the JDI interface
-command as video mode, and removes tear-on/scanline commands because they are
-for command mode. The current flo DT binds `jdi,lt070me05000`; its panel
-driver sets `MIPI_DSI_MODE_VIDEO`. Earlier project notes claiming that the
-Android driver used command mode were unsupported. A command mode conversion
-is therefore not a justified next fix for the brightness artifact. The
-remaining investigation concerns command insertion into the active video
-stream, its timing, and DSI/MDP/PHY state.
+The 2016 [mainline JDI panel submission](https://lkml.iu.edu/hypermail/linux/kernel/1606.3/02884.html)
+describes a video-mode panel and cites a different vendor video-mode DTS.
+However, the [Android flo panel configuration](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-marshmallow/drivers/video/msm/mipi_JDI_1080P_pt.c)
+explicitly sets `MIPI_CMD_PANEL` and `DSI_CMD_MODE`, enables hardware VSYNC,
+selects the TE GPIO and software DSI DMA trigger. Its PHY table comment says
+"video mode", but the executable mode settings are command mode. The current
+mainline panel driver sets `MIPI_DSI_MODE_VIDEO`, and the MDP4 encoder routes
+the CRTC unconditionally to `INTF_DSI_VIDEO`. Our previous claim that the
+Android flo driver used video mode was therefore wrong.
+
+This mismatch is a credible explanation for the physical brightness artifact,
+not yet a demonstrated cause. A correct command-mode port requires MDP4 frame
+kickoff and completion, TE/vblank and atomic flip handling, panel state and
+DPMS/resume validation. The DSI host already has some command-mode register
+setup; the MDP4 encoder and CRTC are incomplete for command mode. Changing
+only the panel flag or encoder selector would break scanout.
 
 ## Confirmed shell fault
 

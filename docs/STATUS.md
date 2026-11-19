@@ -956,6 +956,19 @@ richiesta di halt VBIF e il relativo ack restano a zero pur con GPU e clock
 attivi. Non identifica ancora una correzione sicura. Nessun ciclo completo di
 suspend è stato tentato dopo questo fallimento.
 
+### Luminosità e modalità DSI — correzione delle fonti, 2026-11-19
+
+Il sorgente Android specifico di flo configura il pannello JDI in command
+mode (`MIPI_CMD_PANEL`, `DSI_CMD_MODE`, TE), mentre il DRM attuale usa video
+mode sia nel pannello sia nell'encoder MDP4. La precedente affermazione che
+anche Android flo usasse video mode era errata: derivava dalla descrizione di
+un'altra configurazione JDI. La differenza è documentata in
+[DSI-BRIGHTNESS.md](hw/DSI-BRIGHTNESS.md). Spiega una possibile causa del
+glitch fisico ma non la prova ancora. Il percorso command mode richiede
+kickoff/completamento frame, eventi DRM e TE corretti; il
+[piano dedicato](superpowers/plans/2026-11-19-flo-dsi-command-mode.md)
+esclude il cambio isolato del flag del pannello.
+
 ### Epiphany su pagine complesse — 2026-11-18
 
 Misurati cinque caricamenti a freddo e a caldo del motore WebKitGTK 2.54.2

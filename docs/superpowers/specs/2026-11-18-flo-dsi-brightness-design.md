@@ -25,17 +25,21 @@ was reported at the next frame. The nominal vertical blank lasts about
    scheduling mechanism if available. This preserves the current video
    rendering path but needs evidence that the v2 controller can insert
    DCS commands without disturbing active pixels.
-3. **Full MDP4/DSI command-mode pipeline.** The Android flo driver uses
-   command mode, while current DRM MDP4 unconditionally selects DSI video.
-   A correct port requires frame kickoff, completion and vblank events,
-   TE behavior, damage updates, DPMS and suspend/resume handling. Changing
-   a panel flag or encoder selector alone would leave the rendering path
-   incomplete.
+3. **Full MDP4/DSI command-mode pipeline.** The
+   [Android flo JDI configuration](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-marshmallow/drivers/video/msm/mipi_JDI_1080P_pt.c)
+   sets `MIPI_CMD_PANEL` and `DSI_CMD_MODE` with TE and software DMA trigger.
+   Current DRM MDP4 unconditionally selects DSI video. This is now the main
+   architectural discrepancy to resolve. A correct port requires frame
+   kickoff, completion and vblank events, TE behavior, damage updates, DPMS
+   and suspend/resume handling. Changing a panel flag or encoder selector
+   alone would leave the rendering path incomplete.
 
-The first experiment is approach 1 because it changes one hardware mode
-bit and can be rolled back to the verified r44 boot image. If it fails the
-visual test, proceed with hardware timing evidence before approach 2 or
-the complete command-mode implementation. No UI throttling or synthetic
+Approach 1 was attempted as r45 and failed before a brightness comparison:
+the display became black or stuck. The r42/r47 traces already show the
+brightness artifact without DSI transfer errors. The next implementation
+track is approach 3, built and validated incrementally on an isolated branch.
+Approach 2 remains a possible improvement if hardware evidence shows command
+insertion can be made safe in video mode. No UI throttling or synthetic
 brightness backend is an accepted resolution.
 
 ## r45 outcome
@@ -52,13 +56,18 @@ disable/enable and DSI lane/PHY state across DPMS before another boot.
 
 ## Validation
 
-- Compare r44 and r45 with the same 38-write rapid sequence and the
-  notification panel visible; also repeat the static grid test if the
-  panel appears stable.
+- Keep r50 as the bootable baseline and a verified recovery image before any
+  command-mode kernel. Establish a headless DRM/KMS test path before reboot.
+- Compare r50 and the complete command-mode candidate with the same 38-write
+  rapid sequence and the notification panel visible; repeat the static grid
+  test. Require a user-observed absence of deformation, not just a clean log.
 - Capture DCS transfer results, DSI raw error registers, MDP vblank,
-  command trigger/completion, and user-observed screen behavior.
+  command trigger/completion, TE and user-observed screen behavior. Require
+  that atomic flips complete and the display remains responsive across idle.
 - Verify greeter, login, touch, DPMS wake, Wi-Fi, eMMC access, charger
-  classification/current limit and battery current after reboot.
-- Retain r41, r42 and r44 APKs and exact boot archives until the candidate
-  passes the native matrix. Revert a failed candidate before testing
-  another hardware change.
+  classification/current limit and battery current after reboot; repeat
+  display off/on and a guarded device suspend test before considering a
+  real suspend.
+- Retain r50 APK and exact boot archives until the candidate passes the
+  native matrix. Revert a failed candidate before testing another hardware
+  change.
