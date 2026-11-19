@@ -989,8 +989,8 @@ Ripristinato r50 da TWRP via ADB: downgrade dell'APK nel rootfs, `depmod`,
 `mkinitfs` e sincronizzazione della partizione p22. I checksum di kernel,
 initramfs e DTB su `/boot` e p22 coincidono con l'archivio r50. Dopo il
 riavvio Wi-Fi e greetd sono attivi, APK r50 installato e batteria al 100%.
-La verifica fisica di PIN e touch è ancora in attesa dell'utente. Il glitch
-resta aperto; non pubblicare r51 come correzione.
+L'utente conferma che PIN, accesso e touch funzionano dopo il ripristino.
+Il glitch resta aperto; non pubblicare r51 come correzione.
 
 ### Epiphany su pagine complesse — 2026-11-18
 
