@@ -19,6 +19,19 @@ DPMS/resume validation. The DSI host already has some command-mode register
 setup; the MDP4 encoder and CRTC are incomplete for command mode. Changing
 only the panel flag or encoder selector would break scanout.
 
+On the booted r50 tablet, read-only MMIO confirmed the current mode:
+`DSI_CTRL=0x1f3` (video enabled, command disabled),
+`MDP4_DISP_INTF_SEL=0x49` (primary DSI video selected), and
+`DSI_TRIG_CTRL=0x80000004` (TE select bit and software DMA trigger).
+The GPIO debug view shows GPIO0 input low with pull-up, but this is a single
+sample, not proof that a TE pulse arrives or has the correct polarity. Stock
+flo board code identifies GPIO0 as the JDI TE pin. These observations do not
+yet establish that the mode mismatch alone causes the glitch.
+
+The bootable r50 APK and a host archive of both matching boot copies are
+retained for recovery; archive SHA-256
+`d4b1633bf3cd43ec3892afe2a71d9ec76cb149ae85be1f6583cf2043f3372f95`.
+
 ## Confirmed shell fault
 
 On r23 with flo-shell r8, the UI selected brightnessctl because the executable

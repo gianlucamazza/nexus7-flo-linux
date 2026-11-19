@@ -21,14 +21,14 @@
 
 ## Task 1: establish hardware and baseline contract
 
-- [ ] Confirm the exact stock flo JDI mode, TE GPIO/polarity, DSI trigger settings and MDP4 DMA/IRQ sequence from the [stock panel configuration](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-marshmallow/drivers/video/msm/mipi_JDI_1080P_pt.c) and `mdp4_overlay_dsi_cmd.c`; record source hashes and differences from current DRM.
+- [ ] Confirm the exact stock flo JDI mode, TE GPIO/polarity, DSI trigger settings and MDP4 DMA/IRQ sequence from the [stock panel configuration](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-marshmallow/drivers/video/msm/mipi_JDI_1080P_pt.c) and [MDP4 command path](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-marshmallow/drivers/video/msm/mdp4_overlay_dsi_cmd.c); record source hashes and differences from current DRM. In stock direct output, `INTR_DMA_P_DONE` completes a frame and `INTR_PRIMARY_RDPTR` reports VSYNC; queued DCS is committed before mixer/frame kickoff.
 - [ ] Read GPIO0 and pinctrl state without reconfiguring it; capture current DSI/MDP mode registers and a 38-write brightness trace on r50. Require user observation of the static KMS grid and keep the original backlight value.
 - [ ] Archive both r50 boot copies and verify matching checksums before installing another kernel; prove recovery over USB and retain the r50 APK.
 
 ## Task 2: implement and test the MDP4 command frame lifecycle
 
 - [ ] Write a failing KUnit test for one atomic flush producing exactly one command-frame kickoff and one completion event, including a second flush queued before the first completes; verify RED against current MDP4.
-- [ ] Implement the command-frame state in MDP4 using the stock primary DMA trigger and completion IRQ. Keep `PENDING_FLIP` until that IRQ; complete events and release frame resources once, including timeout/disable paths.
+- [ ] Implement the command-frame state in MDP4 using the stock primary DMA trigger and `MDP4_IRQ_DMA_P_DONE` completion. Keep `PENDING_FLIP` until that IRQ; complete events and release frame resources once, including timeout/disable paths. Keep `MDP4_IRQ_PRIMARY_RDPTR` distinct as a candidate VSYNC source, subject to the TE measurement in Task 3.
 - [ ] Verify GREEN, video-mode tests, ARM object build and `checkpatch`; inspect races between IRQ, disable and atomic commits before continuing.
 
 ## Task 3: TE and DSI integration
