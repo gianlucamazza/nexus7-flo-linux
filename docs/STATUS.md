@@ -1094,6 +1094,16 @@ hash di `/boot` corretti e nessun nuovo errore ext4/MMC/MDP. Il tablet carica
 con corrente positiva. L'utente ha confermato PIN, accesso e touch funzionanti
 dopo quest'ultimo ripristino.
 
+r58 è pronto per una prova diagnostica, ma non è installato. Leggerà stato
+del controller, trigger, interrupt e FIFO DSI prima e dopo i primi due frame
+command mode, con il controller alimentato e runtime PM attivo, senza
+modificare la gestione del frame. Commit kernel `f22193881`, package
+`5d5d976`; checkpatch, 12 KUnit, build armv7 e simulazione upgrade da r50
+riusciti. APK SHA-256
+`adcc346638f0f625dfc31c72b6f85d36f13abe479ba8671c78ca70ecd019e509`;
+copiato su `/var/tmp/nexus7-dsi-host-status-r58.apk`. Il tablet resta su
+r50 in carica finché non sarà confermata una finestra con recovery USB.
+
 ### Epiphany su pagine complesse — 2026-11-18
 
 Misurati cinque caricamenti a freddo e a caldo del motore WebKitGTK 2.54.2
