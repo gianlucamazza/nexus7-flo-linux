@@ -78,8 +78,14 @@ r54 candidate keeps TE enabled, boots with frame DMA skipped, and permits one
 post-boot DMA probe while Wi-Fi is available to read MDP registers on timeout.
 The r54 APK built successfully (SHA-256
 `032c4b0d23c1abdb95f5fc490899aedecef2dfff86308abecccfb463d2ac48ff`)
-but has not been installed. The r53 tablet is not reachable via Wi-Fi; recovery
-USB is required to restore r50 before another probe.
+but has not been installed. After r53 failed, TWRP recovery mounted the inner
+root and boot partitions. The active system journal had a timestamp before
+the r53 reboot; no r53 boot log or pstore record was available. The verified
+r50 APK was installed without package scripts, then `depmod`, `mkinitfs` and
+`nexus7-sync-boot` ran explicitly. The r50 kernel, initramfs and DTB hashes
+matched on both `/boot` and p22. After reboot, Wi-Fi and `greetd` returned,
+the installed package was r50, and the battery read 97%. Physical PIN/touch
+confirmation is pending.
 
 ## Confirmed shell fault
 

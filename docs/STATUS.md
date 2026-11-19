@@ -1016,7 +1016,13 @@ abilitabile dopo l'avvio, in modo da leggere registri e interrupt mentre la
 rete è disponibile.
 L'APK r54 è compilato (SHA-256
 `032c4b0d23c1abdb95f5fc490899aedecef2dfff86308abecccfb463d2ac48ff`)
-ma non installato. Il tablet r53 attende il ripristino r50 da recovery USB.
+ma non installato.
+
+Ripristino completato via TWRP: downgrade offline all'APK r50 verificato,
+`depmod`, `mkinitfs` e sincronizzazione p22. Kernel, initramfs e DTB sulle
+due copie coincidono con i checksum r50 archiviati. Dopo il riavvio Wi-Fi e
+greetd sono attivi, il pacchetto installato è r50 e la batteria è al 97%.
+Conferma visiva di PIN e touch richiesta all'utente. r54 resta non installato.
 
 ### Epiphany su pagine complesse — 2026-11-18
 
