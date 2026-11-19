@@ -1,0 +1,23 @@
+From: Gianluca Mazza <info@gianlucamazza.it>
+Subject: [PATCH] drm/msm/a3xx: log GPU state on VBIF halt timeout
+
+Flo's A320 reports a zero VBIF request readback and acknowledgment in
+both active-display and blank-display device suspend tests. Log whether
+the GPU was initialized and whether its RBBM and VBIF clock registers
+were accessible when the timeout occurred. This is diagnostic only.
+
+---
+--- a/drivers/gpu/drm/msm/adreno/a3xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a3xx_gpu.c
+@@ -593,5 +593,10 @@ static int a3xx_vbif_halt(struct msm_gpu *gpu)
+ 		DRM_DEV_ERROR(gpu->dev->dev,
+-			"VBIF halt timed out: request=%#x ack=%#x mask=%#x\n",
++			"VBIF halt timed out: request=%#x ack=%#x mask=%#lx\n",
+ 			request, ack, A3XX_VBIF_XIN_HALT_CTRL0_MASK);
++		DRM_DEV_ERROR(gpu->dev->dev,
++			"VBIF diagnostic: needs_hw_init=%d rbbm=%#x vbif_clkon=%#x\n",
++			gpu->needs_hw_init,
++			gpu_read(gpu, REG_A3XX_RBBM_STATUS),
++			gpu_read(gpu, REG_A3XX_VBIF_CLKON));
+ 		return -EBUSY;
+ 	}

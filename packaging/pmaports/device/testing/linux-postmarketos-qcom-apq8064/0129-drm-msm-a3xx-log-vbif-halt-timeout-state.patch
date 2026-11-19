@@ -1,0 +1,37 @@
+From: Gianluca Mazza <info@gianlucamazza.it>
+Subject: [PATCH] drm/msm/a3xx: log VBIF halt state when suspend times out
+
+Flo's A320 returns -EBUSY from GPU system suspend even with the panel
+blanked. The ring and RBBM idle timeout messages are absent. Record the
+VBIF halt request readback and final acknowledgment when the poll fails,
+without changing the suspend decision.
+
+---
+--- a/drivers/gpu/drm/msm/adreno/a3xx_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/a3xx_gpu.c
+@@ -578,18 +578,23 @@
+ 
+ static int a3xx_vbif_halt(struct msm_gpu *gpu)
+ {
+-	u32 ack;
++	u32 ack, request;
+ 	int ret;
+ 
+ 	gpu_write(gpu, REG_A3XX_VBIF_XIN_HALT_CTRL0,
+ 		  A3XX_VBIF_XIN_HALT_CTRL0_MASK);
++	request = gpu_read(gpu, REG_A3XX_VBIF_XIN_HALT_CTRL0);
+ 	ret = spin_until(((ack = gpu_read(gpu, REG_A3XX_VBIF_XIN_HALT_CTRL1)) &
+ 			  A3XX_VBIF_XIN_HALT_CTRL0_MASK) ==
+ 			 A3XX_VBIF_XIN_HALT_CTRL0_MASK);
+ 	gpu_write(gpu, REG_A3XX_VBIF_XIN_HALT_CTRL0, 0);
+ 
+-	if (ret)
++	if (ret) {
++		DRM_DEV_ERROR(gpu->dev->dev,
++			"VBIF halt timed out: request=%#x ack=%#x mask=%#x\n",
++			request, ack, A3XX_VBIF_XIN_HALT_CTRL0_MASK);
+ 		return -EBUSY;
++	}
+ 
+ 	return 0;
+ }
