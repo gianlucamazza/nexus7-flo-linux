@@ -207,6 +207,18 @@ counter remained at 22 during this test. The complete trace is in
 whether the first frame reached the panel or why the second stopped. r57 is
 diagnostic only and is not a fix for the brightness glitch.
 
+The current DSI host enables `CMD_MDP_DONE` in command mode, while its IRQ
+handler has no completion branch for that event. Stock MDP4 command mode
+tracks DSI MDP completion separately from MDP overlay/DMA completion and
+waits for the prior DSI transfer before the next kickoff. This is a concrete
+contract difference, but the unchanged DSI IRQ count in r57 does not yet
+show whether the host ever asserted `CMD_MDP_DONE`. The next diagnostic
+should capture DSI `CTRL`, `TRIG_CTRL`, `STATUS0`, `INTR_CTRL` and
+`FIFO_STATUS` around both frame kickoffs while the host clocks are active.
+`STATUS0` can distinguish an active command engine, MDP transfer, DMA
+transfer, or idle host. The trace must remain diagnostic; synchronizing on
+DSI completion is justified only after the event sequence is observed.
+
 The verified r50 APK was reinstalled over Wi-Fi. Kernel, initramfs and DTB
 on both boot copies matched the archived r50 hashes before reboot. An
 emergency sync/remount/reboot returned the tablet to r50: Wi-Fi, greetd,
