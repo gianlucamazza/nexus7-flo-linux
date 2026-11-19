@@ -1022,7 +1022,16 @@ Ripristino completato via TWRP: downgrade offline all'APK r50 verificato,
 `depmod`, `mkinitfs` e sincronizzazione p22. Kernel, initramfs e DTB sulle
 due copie coincidono con i checksum r50 archiviati. Dopo il riavvio Wi-Fi e
 greetd sono attivi, il pacchetto installato è r50 e la batteria è al 97%.
-Conferma visiva di PIN e touch richiesta all'utente. r54 resta non installato.
+L'utente ha confermato accesso e touch. r54 è stato quindi installato per una
+prova diagnostica: parte via Wi-Fi con DMA disabilitato. Con TE acceso, GPIO0
+ha mostrato 3 campioni alti su 400. Abilitato il DMA dopo l'avvio, il primo
+frame è completato con un IRQ MDP; il secondo è rimasto attivo oltre 100 ms.
+Il driver ha letto `INTR_ENABLE=0x0d10`, `INTR_STATUS=0`, `DISP_STATUS=5`,
+`TEAR_CHECK_EN=1`, `OVERLAY_FLUSH=0x11`. GPIO0 mostrava ancora impulsi alti.
+Successivamente Wi-Fi ha smesso di rispondere. Richiesta recovery USB per
+ripristinare r50. Il codice stock programma anche il contatore di sincronismo
+MDP e abilita `mdp_vsync_clk`, operazioni assenti nel candidato; vanno
+implementate e verificate prima di una nuova prova. Glitch ancora aperto.
 
 ### Epiphany su pagine complesse — 2026-11-18
 

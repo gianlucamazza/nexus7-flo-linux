@@ -84,8 +84,31 @@ the r53 reboot; no r53 boot log or pstore record was available. The verified
 r50 APK was installed without package scripts, then `depmod`, `mkinitfs` and
 `nexus7-sync-boot` ran explicitly. The r50 kernel, initramfs and DTB hashes
 matched on both `/boot` and p22. After reboot, Wi-Fi and `greetd` returned,
-the installed package was r50, and the battery read 97%. Physical PIN/touch
-confirmation is pending.
+the installed package was r50, and the battery read 97%. The user then
+confirmed login and touch work.
+
+### r54 post-boot DMA probe
+
+r54 booted with its diagnostic frame-DMA gate enabled. With the command-mode
+panel initialized and `SET_TEAR_ON` sent, GPIO0 sampled high 3 of 400 times
+at approximately 2.5 ms intervals; it had stayed low for all 200 r52 samples.
+This is evidence that TE pulses are present, though software polling does not
+measure their exact shape or period. DSI control was `0x1f5` (command mode),
+and the MDP interrupt count was zero before kickoff.
+
+After disabling the gate and restarting greetd, the first MDP4 command frame
+completed and raised one MDP IRQ. The second frame timed out at 100 ms and
+remained inflight. At timeout: `INTR_ENABLE=0x0d10`, `INTR_STATUS=0`,
+`DISP_STATUS=5`, `TEAR_CHECK_EN=1`, `OVERLAY_FLUSH=0x11`. GPIO0 still showed
+high samples (4/400) after the stall, so loss of panel TE output alone does
+not explain this frame. Wi-Fi later stopped responding; the user was asked to
+enter TWRP for r50 rollback. The exact MDP4 cause remains unproven.
+
+The stock driver also programs the MDP sync counter (`0x100`), initial line
+(`0x128`), output control (`0x118`) and threshold (`0x200`), and enables
+`mdp_vsync_clk`. The r51–r54 path programs only tear-check start/read-pointer
+registers. This is a concrete integration gap to test next, including clock
+lifetime and IRQ behaviour. Do not ship r54 or describe the glitch as fixed.
 
 ## Confirmed shell fault
 
