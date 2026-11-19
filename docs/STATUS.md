@@ -1078,15 +1078,21 @@ via Wi-Fi e verificato su entrambe le copie di boot. Dopo sync/remount/reboot
 d'emergenza, r50 è tornato con Wi-Fi e servizi attivi, senza nuovi errori
 ext4/MMC/MDP; l'utente ha confermato accesso dal PIN e touch funzionante.
 
-r57 è preparato ma non installato: prova a impostare indirizzo IOVA e stride
-del framebuffer primario nel DMA MDP4 durante i commit command mode. La
-traccia r56 misurerà questi registri e la durata del primo frame. L'ipotesi
-che i valori zero causino il completamento prematuro non è ancora provata;
-servono inoltre verifica dei pixel e della composizione multipiano. Checkpatch,
-12 test KUnit, build armv7 e simulazione upgrade riusciti. APK SHA-256
+r57 ha impostato indirizzo IOVA e stride del framebuffer primario nel DMA MDP4
+durante i commit command mode. Checkpatch, 12 test KUnit, build armv7 e
+simulazione upgrade riusciti; APK SHA-256
 `e9490a4ec958c216515977e33e304c0a0e5e11fdc3f844778a9d7163c89a0b27`.
-Il tablet è tuttora su r50; l'alimentatore da parete ora dà corrente positiva.
-Attesa conferma della disponibilità a recovery prima dell'installazione.
+Sul tablet r57 è partito con DMA diagnostico escluso, Wi-Fi e greetd attivi.
+Abilitato il DMA, il primo frame ha usato base `0x01abd000`, stride `0x1300`
+e ha completato dopo 10,6 ms, anziché 97 microsecondi su r56. Il secondo
+frame, con base `0x038bd000` e lo stesso stride, è rimasto bloccato oltre
+100 ms; `DISP_STATUS=5` in entrambi i casi e nessun nuovo IRQ DSI durante la
+prova. Il difetto non è risolto. Log in `build/r57-kernel-trace-20261120.log`.
+r50 è stato reinstallato via Wi-Fi e verificato su entrambe le copie di boot.
+Dopo sync/remount/reboot d'emergenza è tornato con Wi-Fi e servizi attivi,
+hash di `/boot` corretti e nessun nuovo errore ext4/MMC/MDP. Il tablet carica
+con corrente positiva. Resta da confermare fisicamente PIN, accesso e touch
+dopo quest'ultimo ripristino.
 
 ### Epiphany su pagine complesse — 2026-11-18
 

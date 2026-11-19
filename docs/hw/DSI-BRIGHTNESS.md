@@ -179,7 +179,7 @@ Wi-Fi, greetd, NetworkManager and flo-sessiond are active, with no new ext4,
 MMC or MDP timeout in the boot journal. The user confirmed PIN login and
 working touch after this boot.
 
-### r57 framebuffer DMA source probe (prepared)
+### r57 framebuffer DMA source probe (tested, not retained)
 
 r57 writes the primary framebuffer IOVA and pitch into the MDP4 DMA source
 registers on active command-mode commits, matching the stock driver's
@@ -191,9 +191,29 @@ fix. The source commit is `0df5f7334`, package commit `fc1c81f`, and the
 armv7 APK SHA-256 is
 `e9490a4ec958c216515977e33e304c0a0e5e11fdc3f844778a9d7163c89a0b27`.
 Checkpatch and 12 KUnit tests passed, the armv7 package built, and the offline
-upgrade simulation passed. The APK is copied to the tablet but is **not
-installed**; r50 still runs. The wall charger now reports positive current.
-A recovery-capable operator confirmation is pending before deployment.
+upgrade simulation passed. The tablet booted r57 with frame DMA initially
+disabled; Wi-Fi and greetd were active. After enabling DMA and restarting
+greetd, the trace showed:
+
+| Time since boot | Event | DMA base | DMA stride | Result |
+| --- | --- | --- | --- | --- |
+| 57.558137 s | Frame 1 kickoff | `0x01abd000` | `0x1300` | Completion after 10.6 ms; `DISP_STATUS=5` |
+| 57.576233 s | Frame 2 kickoff | `0x038bd000` | `0x1300` | No completion after 100 ms; `DISP_STATUS=5` |
+
+The populated DMA source changed the first completion from 97 microseconds
+on r56 to 10.6 ms, but did not resolve the second-frame stall. The DSI IRQ
+counter remained at 22 during this test. The complete trace is in
+`build/r57-kernel-trace-20261120.log`. These observations do not establish
+whether the first frame reached the panel or why the second stopped. r57 is
+diagnostic only and is not a fix for the brightness glitch.
+
+The verified r50 APK was reinstalled over Wi-Fi. Kernel, initramfs and DTB
+on both boot copies matched the archived r50 hashes before reboot. An
+emergency sync/remount/reboot returned the tablet to r50: Wi-Fi, greetd,
+NetworkManager and flo-sessiond are active, `/boot` matches r50, and the
+new boot journal contains no ext4, MMC or MDP timeout errors. The wall
+charger reports positive current. PIN login and touch still require a
+physical check after this rollback.
 
 ## Confirmed shell fault
 
