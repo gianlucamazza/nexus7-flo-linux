@@ -136,3 +136,44 @@ The thermal zones are `bq27541-0` and `cpu0-thermal` through
 `cpu3-thermal`. Before the benchmark the CPU policy maximum was 1.512 GHz;
 the CPU zones read 40–47 °C. These are starting values, not load results.
 The probe browser and its temporary profile were closed and removed.
+
+## Compositor A/B on the tablet, 2026-11-19
+
+With the tablet at 100% and the power controller reporting `Full`, the same
+benchmark ran five cold/warm iterations per page first with WebKitGTK's
+default Skia compositor, then with process-local
+`WEBKIT_USE_SKIA_FOR_COMPOSITION=0` (TextureMapper). Each run used
+`/var/tmp/epiphany-ab-run.sh <skia|texturemapper>`, which invoked the
+unchanged `scripts/epiphany-perf.py` as user `tablet`, sampled all four CPU
+frequency policies and named thermal zones once per second, and restored
+`flo-shell`'s idle inhibition on exit. No persistent setting was changed.
+All 40 page loads had the expected title, first contentful paint, and load
+event; both test browsers exited normally.
+
+| Page and phase | Skia wall median / p90 | TextureMapper wall median / p90 | Skia paint-to-load median | TextureMapper paint-to-load median |
+| --- | ---: | ---: | ---: | ---: |
+| Local cold | 3,481 / 4,125 ms | 3,858 / 4,034 ms | 0 ms | 0 ms |
+| Local warm | 1,530 / 1,686 ms | 1,936 / 2,006 ms | 0 ms | 0 ms |
+| GitHub cold | 27,102 / 28,409 ms | 26,512 / 27,589 ms | 8,444 ms | 8,089 ms |
+| GitHub warm | 12,451 / 12,949 ms | 12,249 / 12,397 ms | 3,605 ms | 3,468 ms |
+
+On the warm GitHub visit, TextureMapper improved the WebDriver wall median
+by 202 ms (1.6%) and paint-to-load by 137 ms (3.8%), while the local warm
+control regressed by 405 ms (26%). Median cumulative browser CPU on GitHub
+warm rose from 20.44 to 20.98 CPU-seconds and PSS rose from 242,444 to
+249,596 kB. Web-process CPU alone was
+14.91 versus 14.45 CPU-seconds; the UI process rose from 5.72 to 6.19.
+The public page loaded about 70 resources in both warm modes. TextureMapper
+also reduced the post-load two-frame probe from 1,707 to 1,364 ms, but that
+probe is not a touch-latency measurement and the local navigation regressed.
+
+The Skia run started with CPU zones at 44–48 °C and reached 72 °C; the later
+TextureMapper run started at 51–56 °C and reached 79 °C. This test order
+confounds the temperature comparison. Both runs had median CPU frequency
+1.512 GHz, with 264/297 and 259/300 one-second samples at that frequency;
+the first thermal trip point is 85 °C and the CPU policy maximum remained
+1.512 GHz. No sustained thermal throttle was observed. The small public-page
+difference, higher CPU/PSS and slower local control do not meet the plan's
+acceptance criteria. **Keep Skia as the default.** The A/B flag was never
+applied to Epiphany's installed configuration. Raw reports and telemetry stay
+in the ignored `reports/` directory on the host.
