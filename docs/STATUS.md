@@ -1016,7 +1016,7 @@ abilitabile dopo l'avvio, in modo da leggere registri e interrupt mentre la
 rete è disponibile.
 L'APK r54 è compilato (SHA-256
 `032c4b0d23c1abdb95f5fc490899aedecef2dfff86308abecccfb463d2ac48ff`)
-ma non installato.
+e successivamente installato per la prova post-avvio.
 
 Ripristino completato via TWRP: downgrade offline all'APK r50 verificato,
 `depmod`, `mkinitfs` e sincronizzazione p22. Kernel, initramfs e DTB sulle
@@ -1029,9 +1029,22 @@ frame è completato con un IRQ MDP; il secondo è rimasto attivo oltre 100 ms.
 Il driver ha letto `INTR_ENABLE=0x0d10`, `INTR_STATUS=0`, `DISP_STATUS=5`,
 `TEAR_CHECK_EN=1`, `OVERLAY_FLUSH=0x11`. GPIO0 mostrava ancora impulsi alti.
 Successivamente Wi-Fi ha smesso di rispondere. Richiesta recovery USB per
-ripristinare r50. Il codice stock programma anche il contatore di sincronismo
-MDP e abilita `mdp_vsync_clk`, operazioni assenti nel candidato; vanno
-implementate e verificate prima di una nuova prova. Glitch ancora aperto.
+ripristinare r50. Prima della riparazione, e2fsck in sola lettura ha segnalato
+un extent invalido sull'inode 132763; per questo `e2image` non ha potuto
+salvare i soli metadati. È stata quindi copiata l'intera partizione root
+smontata (12.601.736.704 byte) in
+`build/r54-root-before-fsck.img.gz`, SHA-256
+`1cedfffaa5b7b0e4d09c059900780d6d38b37d08b7804a29fd5a10bdfad75030`.
+Decompressione e conteggio byte riusciti. e2fsck 1.47.4 ha riprodotto i
+journal root e boot; il successivo controllo completo root è terminato con
+codice 0 e l'extent invalido è scomparso. TWRP ha reinstallato l'APK r50
+verificato, eseguito `depmod`, `mkinitfs` e `nexus7-sync-boot`; kernel,
+initramfs e DTB di `/boot` e p22 corrispondono ai checksum r50. Dopo
+smontaggio pulito e riavvio, Wi-Fi e greetd sono attivi e il pacchetto è r50.
+Batteria al 90%, in scarica sulla USB del computer. L'utente ha confermato
+PIN, accesso e touch. Il codice stock programma anche il contatore di
+sincronismo MDP e abilita `mdp_vsync_clk`, operazioni assenti nel candidato;
+vanno implementate e verificate prima di una nuova prova. Glitch ancora aperto.
 
 ### Epiphany su pagine complesse — 2026-11-18
 

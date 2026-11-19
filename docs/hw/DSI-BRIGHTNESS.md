@@ -78,7 +78,7 @@ r54 candidate keeps TE enabled, boots with frame DMA skipped, and permits one
 post-boot DMA probe while Wi-Fi is available to read MDP registers on timeout.
 The r54 APK built successfully (SHA-256
 `032c4b0d23c1abdb95f5fc490899aedecef2dfff86308abecccfb463d2ac48ff`)
-but has not been installed. After r53 failed, TWRP recovery mounted the inner
+and was later installed for the post-boot DMA probe. After r53 failed, TWRP recovery mounted the inner
 root and boot partitions. The active system journal had a timestamp before
 the r53 reboot; no r53 boot log or pstore record was available. The verified
 r50 APK was installed without package scripts, then `depmod`, `mkinitfs` and
@@ -102,7 +102,21 @@ remained inflight. At timeout: `INTR_ENABLE=0x0d10`, `INTR_STATUS=0`,
 `DISP_STATUS=5`, `TEAR_CHECK_EN=1`, `OVERLAY_FLUSH=0x11`. GPIO0 still showed
 high samples (4/400) after the stall, so loss of panel TE output alone does
 not explain this frame. Wi-Fi later stopped responding; the user was asked to
-enter TWRP for r50 rollback. The exact MDP4 cause remains unproven.
+enter TWRP for r50 rollback. Before repair, e2fsck `-fn` reported an invalid
+extent header on inode 132763. Because that prevented `e2image` from saving
+metadata, a complete compressed image of the unmounted 12,601,736,704-byte
+root partition was saved as `build/r54-root-before-fsck.img.gz` (SHA-256
+`1cedfffaa5b7b0e4d09c059900780d6d38b37d08b7804a29fd5a10bdfad75030`).
+The gzip stream decompressed without error to exactly the source size. Modern
+e2fsck 1.47.4 then replayed the root and inner boot journals with `-p`; a
+subsequent full root check with `-fn` returned 0. The earlier extent error was
+not present after journal replay. TWRP installed the verified r50 APK offline,
+then ran `depmod`, `mkinitfs` and `nexus7-sync-boot`. Kernel, initramfs and DTB
+on `/boot` and p22 exactly matched their archived r50 hashes. All mounts and
+loops were detached before reboot. r50 booted on Wi-Fi with greetd active and
+the installed package at r50; battery read 90% and discharging on computer
+USB. The user confirmed PIN login and touch. The exact MDP4 cause
+remains unproven.
 
 The stock driver also programs the MDP sync counter (`0x100`), initial line
 (`0x128`), output control (`0x118`) and threshold (`0x200`), and enables
