@@ -46,6 +46,37 @@ commit indefinitely. A bounded and hardware-backed recovery path and a
 diagnostic boot are required before another normal install. r51 must not be
 published or described as a brightness fix.
 
+### r52 diagnostic and TE command gap
+
+A diagnostic r52 build retained the r51 command-mode setup but skipped every
+MDP4 command-frame DMA kickoff. It reached Wi-Fi and `greetd`; the kernel log
+records `MDP4 diagnostic: frame DMA disabled`. This narrows the r51 boot
+failure to the kickoff/completion path, without proving which register or
+signal is responsible. The display did not receive frames, and fbdev logged
+repeated vblank wait timeouts, as expected for this diagnostic. The MDP IRQ
+count remained zero. GPIO0 was configured as `mdp_vsync`, input with a 2 mA
+pull-down; 200 samples at approximately 5 ms intervals were low. This sampling
+cannot rule out short TE pulses. The r52 kernel journal is saved as
+`build/flo-r52-kernel-journal-20261119.log`. r50 was reinstalled after the
+probe and returned on Wi-Fi with `greetd` active.
+
+The [stock flo DSI host](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-marshmallow/drivers/video/msm/mipi_dsi.c)
+sends DCS `SET_TEAR_ON` (`0x35, 0x00`) after enabling a command-mode panel;
+r51 did not send it. The stock pull-down setting also
+matches the r51 pinctrl state, so pull-down alone is not evidence of a wiring
+error. The missing DCS command is a concrete candidate cause of the absent
+frame completion. It needs a focused test and native frame/TE verification;
+do not treat it as a confirmed fix.
+
+An r53 panel patch sends `SET_TEAR_ON` after display-on and `SET_TEAR_OFF`
+before display-off only in command mode. Its KUnit test failed before the
+command was added, then all ten MDP4/JDI tests passed. The armv7 APK built,
+the simulated upgrade passed, and both boot copies matched. Native r53 again
+failed to return on Wi-Fi after reboot, so the TE command alone did not solve
+the kickoff/boot failure. Recovery and log capture are pending. A diagnostic
+r54 candidate keeps TE enabled, boots with frame DMA skipped, and permits one
+post-boot DMA probe while Wi-Fi is available to read MDP registers on timeout.
+
 ## Confirmed shell fault
 
 On r23 with flo-shell r8, the UI selected brightnessctl because the executable

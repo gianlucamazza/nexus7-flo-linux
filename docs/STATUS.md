@@ -992,6 +992,29 @@ riavvio Wi-Fi e greetd sono attivi, APK r50 installato e batteria al 100%.
 L'utente conferma che PIN, accesso e touch funzionano dopo il ripristino.
 Il glitch resta aperto; non pubblicare r51 come correzione.
 
+### Diagnostica r52: avvio senza kickoff e comando TE mancante — 2026-11-19
+
+r52 conserva la configurazione command mode di r51 ma salta il kickoff DMA dei
+frame. Avvia Wi-Fi e greetd; la schermata non riceve frame e fbdev segnala
+timeout vblank. L'IRQ MDP è rimasto a zero. GPIO0 è assegnato a `mdp_vsync`
+con pull-down e risultava basso in 200 letture ravvicinate; questa misura non
+esclude impulsi brevi. r50 è stato reinstallato e riavviato, tornando
+raggiungibile via Wi-Fi con greetd attivo. Una verifica visiva del PIN dopo
+questo secondo ripristino è stata richiesta all'utente.
+
+Il sorgente Android flo invia `SET_TEAR_ON` (`0x35, 0x00`) all'accensione del
+pannello command mode, mentre r51 omette quel comando. Una nuova prova dovrà
+verificare se la sua aggiunta ripristina TE e completamento dei frame. r52 è
+solo diagnostico e il glitch della luminosità resta aperto.
+
+r53 aggiunge il comando TE: il test KUnit prima falliva e ora la suite passa
+10/10; build armv7 e upgrade simulato passano. Dopo il riavvio il tablet non
+è tornato su Wi-Fi entro due minuti, quindi il solo comando non risolve il
+blocco. È stata richiesta la recovery USB per salvare eventuali log e
+ripristinare r50. r54 è in preparazione come prova diagnostica con kickoff
+abilitabile dopo l'avvio, in modo da leggere registri e interrupt mentre la
+rete è disponibile.
+
 ### Epiphany su pagine complesse — 2026-11-18
 
 Misurati cinque caricamenti a freddo e a caldo del motore WebKitGTK 2.54.2
