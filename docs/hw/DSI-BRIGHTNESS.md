@@ -76,6 +76,10 @@ failed to return on Wi-Fi after reboot, so the TE command alone did not solve
 the kickoff/boot failure. Recovery and log capture are pending. A diagnostic
 r54 candidate keeps TE enabled, boots with frame DMA skipped, and permits one
 post-boot DMA probe while Wi-Fi is available to read MDP registers on timeout.
+The r54 APK built successfully (SHA-256
+`032c4b0d23c1abdb95f5fc490899aedecef2dfff86308abecccfb463d2ac48ff`)
+but has not been installed. The r53 tablet is not reachable via Wi-Fi; recovery
+USB is required to restore r50 before another probe.
 
 ## Confirmed shell fault
 

@@ -1014,6 +1014,9 @@ blocco. È stata richiesta la recovery USB per salvare eventuali log e
 ripristinare r50. r54 è in preparazione come prova diagnostica con kickoff
 abilitabile dopo l'avvio, in modo da leggere registri e interrupt mentre la
 rete è disponibile.
+L'APK r54 è compilato (SHA-256
+`032c4b0d23c1abdb95f5fc490899aedecef2dfff86308abecccfb463d2ac48ff`)
+ma non installato. Il tablet r53 attende il ripristino r50 da recovery USB.
 
 ### Epiphany su pagine complesse — 2026-11-18
 
