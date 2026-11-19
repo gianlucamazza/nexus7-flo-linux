@@ -143,7 +143,7 @@ their r50 hashes. A normal reboot request timed out while the old r55 kernel
 was blocked. After a physical power cycle, r50 returned on Wi-Fi with a new
 uptime, greetd, NetworkManager and flo-sessiond active. The installed package
 and `/boot` hashes match r50; the new kernel journal has no ext4, MMC or MDP
-timeout errors. Physical PIN/touch confirmation after this boot is pending.
+timeout errors. The user confirmed successful PIN login after this boot.
 
 ## Confirmed shell fault
 

@@ -1059,8 +1059,8 @@ boot sono stati verificati contro gli hash r50. La richiesta di riavvio
 normale è scaduta mentre r55 era bloccato. Dopo un ciclo Power fisico, r50 è
 tornato via Wi-Fi con nuovo uptime: greetd, NetworkManager e flo-sessiond
 attivi, APK e hash di `/boot` corrispondenti a r50, nessun nuovo errore
-ext4/MMC/MDP nel journal. Conferma fisica di PIN e touch dopo questo avvio
-ancora attesa.
+ext4/MMC/MDP nel journal. L'utente ha confermato l'accesso dal PIN dopo
+questo avvio.
 
 ### Epiphany su pagine complesse — 2026-11-18
 
