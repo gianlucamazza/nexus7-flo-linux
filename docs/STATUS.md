@@ -952,3 +952,21 @@ Suspend non è ancora funzionante: il kernel espone solo `s2idle` e la prova
 schermo spento. La prova freezer passa. Il dettaglio e la successiva
 diagnostica del driver A3xx sono in [SUSPEND-20261118.md](hw/SUSPEND-20261118.md).
 Nessun ciclo completo di suspend è stato tentato dopo questo fallimento.
+
+### Epiphany su pagine complesse — 2026-11-18
+
+Misurati cinque caricamenti a freddo e a caldo del motore WebKitGTK 2.54.2
+su Flo: la pagina pubblica GitHub Topics richiede ancora 3,6 s mediani tra
+prima pittura e evento `load` alla seconda visita. Il processo WebKit consuma
+14,8 secondi CPU cumulati in una prova mirata, mentre il processo di rete usa
+0,15 secondi CPU; i tempi di rete residui non sono esclusi del tutto.
+Nessuna modifica al browser è giustificata dai dati attuali; 2.54.3 non è
+ancora nel repository Alpine armv7. Metodo, limiti e prossimo confronto sono
+in [EPIPHANY-PERF-20261118.md](hw/EPIPHANY-PERF-20261118.md).
+
+Il confronto con TextureMapper migliora la pagina pubblica a caldo solo
+dell'1,6% ma rallenta il controllo locale del 26%: resta Skia. La frequenza
+CPU è rimasta vicina al massimo, senza throttling sostenuto. Un profilo CPU
+completo della visita a freddo individua il matching dei selettori CSS tra i
+costi, ma le tracce della visita a caldo non consentono ancora attribuzione
+per funzione. Gli strumenti temporanei di profiling sono stati rimossi.
