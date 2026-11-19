@@ -176,8 +176,24 @@ configuration difference to validate before changing it. r50 was restored
 over Wi-Fi, and kernel, initramfs and DTB on both boot copies matched the
 archived hashes. An emergency sync/remount/reboot returned the tablet to r50;
 Wi-Fi, greetd, NetworkManager and flo-sessiond are active, with no new ext4,
-MMC or MDP timeout in the boot journal. The user sees the PIN greeter;
-login/touch confirmation for this boot is pending.
+MMC or MDP timeout in the boot journal. The user confirmed PIN login and
+working touch after this boot.
+
+### r57 framebuffer DMA source probe (prepared)
+
+r57 writes the primary framebuffer IOVA and pitch into the MDP4 DMA source
+registers on active command-mode commits, matching the stock driver's
+configuration step. The r56 trace also records those registers before each
+kickoff. This tests whether zero DMA source/stride caused the 97-microsecond
+completion. It remains an unproven hypothesis; the resulting pixels and
+multi-plane composition must be checked on hardware before considering it a
+fix. The source commit is `0df5f7334`, package commit `fc1c81f`, and the
+armv7 APK SHA-256 is
+`e9490a4ec958c216515977e33e304c0a0e5e11fdc3f844778a9d7163c89a0b27`.
+Checkpatch and 12 KUnit tests passed, the armv7 package built, and the offline
+upgrade simulation passed. The APK is copied to the tablet but is **not
+installed**; r50 still runs. The wall charger now reports positive current.
+A recovery-capable operator confirmation is pending before deployment.
 
 ## Confirmed shell fault
 

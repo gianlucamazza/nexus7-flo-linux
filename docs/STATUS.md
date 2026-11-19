@@ -1076,7 +1076,17 @@ lascia a zero: differenza concreta da verificare prima di modificarla.
 Log completo in `build/r56-kernel-trace-20261119.log`. r50 è stato reinstallato
 via Wi-Fi e verificato su entrambe le copie di boot. Dopo sync/remount/reboot
 d'emergenza, r50 è tornato con Wi-Fi e servizi attivi, senza nuovi errori
-ext4/MMC/MDP; il greeter PIN è visibile. Conferma di login e touch attesa.
+ext4/MMC/MDP; l'utente ha confermato accesso dal PIN e touch funzionante.
+
+r57 è preparato ma non installato: prova a impostare indirizzo IOVA e stride
+del framebuffer primario nel DMA MDP4 durante i commit command mode. La
+traccia r56 misurerà questi registri e la durata del primo frame. L'ipotesi
+che i valori zero causino il completamento prematuro non è ancora provata;
+servono inoltre verifica dei pixel e della composizione multipiano. Checkpatch,
+12 test KUnit, build armv7 e simulazione upgrade riusciti. APK SHA-256
+`e9490a4ec958c216515977e33e304c0a0e5e11fdc3f844778a9d7163c89a0b27`.
+Il tablet è tuttora su r50; l'alimentatore da parete ora dà corrente positiva.
+Attesa conferma della disponibilità a recovery prima dell'installazione.
 
 ### Epiphany su pagine complesse — 2026-11-18
 
