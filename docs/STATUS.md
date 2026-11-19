@@ -1091,7 +1091,7 @@ prova. Il difetto non è risolto. Log in `build/r57-kernel-trace-20261120.log`.
 r50 è stato reinstallato via Wi-Fi e verificato su entrambe le copie di boot.
 Dopo sync/remount/reboot d'emergenza è tornato con Wi-Fi e servizi attivi,
 hash di `/boot` corretti e nessun nuovo errore ext4/MMC/MDP. Il tablet carica
-con corrente positiva. Resta da confermare fisicamente PIN, accesso e touch
+con corrente positiva. L'utente ha confermato PIN, accesso e touch funzionanti
 dopo quest'ultimo ripristino.
 
 ### Epiphany su pagine complesse — 2026-11-18

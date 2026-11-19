@@ -224,8 +224,8 @@ on both boot copies matched the archived r50 hashes before reboot. An
 emergency sync/remount/reboot returned the tablet to r50: Wi-Fi, greetd,
 NetworkManager and flo-sessiond are active, `/boot` matches r50, and the
 new boot journal contains no ext4, MMC or MDP timeout errors. The wall
-charger reports positive current. PIN login and touch still require a
-physical check after this rollback.
+charger reports positive current. The user confirmed PIN login and working
+touch after this rollback.
 
 ## Confirmed shell fault
 
