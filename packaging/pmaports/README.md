@@ -4,7 +4,10 @@
 diagnostic kernel recipe `7.2_p20261118101500-r50`. It advances the tested
 r48 recipe with two A320 suspend diagnostics. The r49 package was built,
 installed and booted; it reproduced the GPU suspend failure. The r50
-package is **not yet built or installed**. Its source is on the companion
+package was also built, installed and booted; its added registers narrowed
+the investigation but did not resolve suspend. The r50 APK SHA-256 is
+`02987568e899dd7cf77cae59e424f232c9be7b18e6c718242b177013a57a3dc4`.
+Its source is on the companion
 [`linux-flo` diagnostic branch](https://github.com/gianlucamazza/linux-flo/tree/flo/suspend-diagnostics-r50).
 
 Copy this directory over the matching directory in a compatible pmaports

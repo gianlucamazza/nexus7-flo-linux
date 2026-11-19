@@ -951,7 +951,10 @@ Suspend non è ancora funzionante: il kernel espone solo `s2idle` e la prova
 `pm_test=devices` fallisce due volte su `4300000.gpu` con `-EBUSY`, anche a
 schermo spento. La prova freezer passa. Il dettaglio e la successiva
 diagnostica del driver A3xx sono in [SUSPEND-20261118.md](hw/SUSPEND-20261118.md).
-Nessun ciclo completo di suspend è stato tentato dopo questo fallimento.
+La diagnostica r50, installata e avviata il 19 novembre, conferma che la
+richiesta di halt VBIF e il relativo ack restano a zero pur con GPU e clock
+attivi. Non identifica ancora una correzione sicura. Nessun ciclo completo di
+suspend è stato tentato dopo questo fallimento.
 
 ### Epiphany su pagine complesse — 2026-11-18
 
