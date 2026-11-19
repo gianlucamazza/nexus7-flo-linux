@@ -14,6 +14,7 @@
 
 - `drivers/gpu/drm/msm/disp/mdp4/mdp4_dsi_encoder.c`: select and enable the command interface for a command-mode panel, retain video behavior elsewhere.
 - `drivers/gpu/drm/msm/disp/mdp4/mdp4_crtc.c` and `mdp4_kms.h`: command frame kickoff, completion, atomic flip events and real vblank accounting.
+- `drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.c` and `registers/display/mdp4.xml`: carry the attached panel's mode into the encoder and define any missing MDP4 command/TE registers against stock offsets. MDP5 provides an existing `msm_dsi_is_cmd_mode()` modeset pattern, not a drop-in MDP4 implementation.
 - `drivers/gpu/drm/msm/dsi/dsi_host.c` and `dsi_manager.c`: expose mode/trigger state to MDP4 and serialize panel DCS with frame DMA.
 - `drivers/gpu/drm/panel/panel-jdi-lt070me05000.c`: select command mode only after the complete transport path exists; preserve one-byte `0x51` and power sequencing.
 - `arch/arm/boot/dts/qcom/qcom-apq8064-asus-nexus7-flo.dts`: describe TE pin only if GPIO0 and polarity are validated against stock source and live pin state.
