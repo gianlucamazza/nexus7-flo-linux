@@ -1056,8 +1056,11 @@ si è bloccato ancora oltre 100 ms con gli stessi registri di r54. Il solo
 clock VSYNC non risolve il difetto. Prima della perdita della rete l'APK r50
 è stato reinstallato via Wi-Fi e kernel, initramfs e DTB delle due copie di
 boot sono stati verificati contro gli hash r50. La richiesta di riavvio
-normale è scaduta mentre r55 era bloccato; spegnimento forzato e conferma
-fisica del riavvio r50 ancora in attesa.
+normale è scaduta mentre r55 era bloccato. Dopo un ciclo Power fisico, r50 è
+tornato via Wi-Fi con nuovo uptime: greetd, NetworkManager e flo-sessiond
+attivi, APK e hash di `/boot` corrispondenti a r50, nessun nuovo errore
+ext4/MMC/MDP nel journal. Conferma fisica di PIN e touch dopo questo avvio
+ancora attesa.
 
 ### Epiphany su pagine complesse — 2026-11-18
 

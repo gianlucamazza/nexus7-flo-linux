@@ -140,7 +140,10 @@ completed, but the second stalled again at 100 ms with
 this second-frame failure. While Wi-Fi still worked, the verified r50 APK
 was installed and the kernel, initramfs and DTB on `/boot` and p22 matched
 their r50 hashes. A normal reboot request timed out while the old r55 kernel
-was blocked; forced power cycling and physical boot confirmation are pending.
+was blocked. After a physical power cycle, r50 returned on Wi-Fi with a new
+uptime, greetd, NetworkManager and flo-sessiond active. The installed package
+and `/boot` hashes match r50; the new kernel journal has no ext4, MMC or MDP
+timeout errors. Physical PIN/touch confirmation after this boot is pending.
 
 ## Confirmed shell fault
 
