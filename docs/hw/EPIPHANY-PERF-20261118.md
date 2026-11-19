@@ -10,8 +10,10 @@ no request duration above 1 ms. That supports, but does not prove, that the
 network is no longer dominant. One attribution run used
 14.8 CPU-seconds in `WebKitWebProcess`, 4.5 in MiniBrowser, and 0.15 in the
 network process over a 12.4 s wall-clock navigation. This is cumulative CPU
-time across cores. The result does not separate JavaScript, style, layout and
-compositing inside the Web process.
+time across cores. The warm result does not reliably separate JavaScript,
+style, layout and compositing inside the Web process. A later cold-only CPU
+sample identifies CSS selector matching as one contributor to the initial
+load; it cannot be extrapolated to the warm delay.
 
 The current Alpine armv7 repository has Epiphany 50.6 and WebKitGTK 2.54.2-r2.
 WebKitGTK 2.54.3 was [released on 18 November](https://webkitgtk.org/2026/11/18/webkitgtk2.54.3-released.html),
@@ -63,9 +65,10 @@ started in `--automation-mode` on Flo. The core is SIGABRT, not an OOM kill.
 Thus WebDriver samples the same WebKitGTK engine through MiniBrowser, not
 Epiphany's own chrome. An isolated normal Epiphany instance was also launched
 with `--profile=/var/tmp/epiphany-perf-profile`; its temporary profile was
-removed afterward. Sysprof's trace from that run contained WebKit marks, but
-did not reliably cover the full navigation, so it cannot attribute the hot
-Web-process functions. Sysprof was uninstalled after this bounded test.
+removed afterward. Its first Sysprof trace did not reliably cover the full
+navigation. A later complete mark trace and cold CPU sample are described
+below; neither supplies reliable warm function attribution. Sysprof was
+uninstalled after profiling.
 
 ## Next supported change and acceptance
 
@@ -73,9 +76,9 @@ Web-process functions. Sysprof was uninstalled after this bounded test.
    upgrade through `apk`, and repeat the same five cold and five warm runs.
    Compare medians and slow runs, the local control, and a physical touch
    check. Do not infer a speedup from the release notes alone.
-2. If the delay persists, capture a complete WebKit Web-process trace with
-   symbols and an upstream reproducible case before proposing an engine
-   change. The [upstream performance draft](../upstream/webkitgtk-armv7-page-load-draft.md)
+2. If the delay persists, capture a warm WebKit Web-process CPU trace with
+   working symbols and an upstream reproducible case before proposing an
+   engine change. The [upstream performance draft](../upstream/webkitgtk-armv7-page-load-draft.md)
    records the current case and missing evidence. Keep the Epiphany
    automation-mode SIGABRT as a separate bug.
 3. Treat changes to the third-party GitHub page as outside this project.
@@ -177,3 +180,43 @@ difference, higher CPU/PSS and slower local control do not meet the plan's
 acceptance criteria. **Keep Skia as the default.** The A/B flag was never
 applied to Epiphany's installed configuration. Raw reports and telemetry stay
 in the ignored `reports/` directory on the host.
+
+## Web-process profiling, 2026-11-19
+
+Sysprof 51, `perf` 7.3.5 and matching WebKitGTK 2.54.2 debug symbols were
+installed temporarily. A complete public-page navigation produced 1,577
+WebKit Sysprof marks over 19.7 s, but Sysprof's sampling helper could not
+open its per-CPU event stream on this kernel. The marks span both sides of
+first contentful paint: one `StyleRecalc` interval ran from 4.38 to 9.99 s,
+and subsequent `PerformLayout`, `ExecuteScriptElement` and `StyleRecalc`
+intervals reached roughly 16.6 s. Marks can overlap and are **not** CPU-time
+totals. They show activity after paint, not which operation dominates the
+warm page load.
+
+Direct `perf record` sampling did work on the actual Web process. The
+single-process cold navigation yielded 3,297 cycle samples in 32.0 s with
+zero lost samples. By DSO, 41.17% of sampled cycles were in WebKitGTK,
+12.28% in JavaScriptCore, 22.16% in musl, 12.82% in the kernel, 6.49% in
+fontconfig and 0.99% in Mesa. With matching debug symbols, the largest
+resolved leaf function was
+`WebCore::Style::ElementRuleCollector::collectMatchingRulesForListSlow`
+(3.43% of sampled cycles); `WebCore::SelectorChecker::checkOne` accounted
+for 1.84%. These data support CSS selector matching as a **cold-load**
+contributor, not as the cause of the warm 3.6 s paint-to-load interval.
+
+A separate 14.8 s warm-process capture had 1,667 samples, but 87.42% were
+`[unknown]` after `perf` lost the process map during attachment. A final
+parent-process capture included both navigation phases and 9,678 samples
+with no reported loss. Its warm navigation completed in 12.63 s (FCP 4.59 s,
+paint-to-load 3.77 s), but this tablet's `perf` symbolization terminated
+while processing the full parent capture, so that trace also cannot support
+function-level warm attribution. The repeat run is consistent with the
+five-sample baseline; it is not an additional A/B trial. The unresolved
+symbols are a measurement limitation, not evidence of an engine fault.
+
+All trace files and private test profiles were removed from the tablet after
+the aggregate results were recorded on the host. Sysprof, `perf`, matching
+debug symbols and their temporary `/usr/lib/debug/lib` symlink were removed;
+Epiphany 50.6 and WebKitGTK 2.54.2 remained installed. The tablet session
+was unlocked and responded to `flo-shell`, with idle inhibition off,
+and the battery controller reported `Full`, 100%.

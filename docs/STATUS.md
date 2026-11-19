@@ -963,3 +963,10 @@ prima pittura e evento `load` alla seconda visita. Il processo WebKit consuma
 Nessuna modifica al browser è giustificata dai dati attuali; 2.54.3 non è
 ancora nel repository Alpine armv7. Metodo, limiti e prossimo confronto sono
 in [EPIPHANY-PERF-20261118.md](hw/EPIPHANY-PERF-20261118.md).
+
+Il confronto con TextureMapper migliora la pagina pubblica a caldo solo
+dell'1,6% ma rallenta il controllo locale del 26%: resta Skia. La frequenza
+CPU è rimasta vicina al massimo, senza throttling sostenuto. Un profilo CPU
+completo della visita a freddo individua il matching dei selettori CSS tra i
+costi, ma le tracce della visita a caldo non consentono ancora attribuzione
+per funzione. Gli strumenti temporanei di profiling sono stati rimossi.
