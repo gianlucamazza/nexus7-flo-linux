@@ -969,6 +969,29 @@ kickoff/completamento frame, eventi DRM e TE corretti; il
 [piano dedicato](superpowers/plans/2026-11-19-flo-dsi-command-mode.md)
 esclude il cambio isolato del flag del pannello.
 
+### Command mode r51: avvio fallito e ripristino — 2026-11-19
+
+Preparato un percorso MDP4/DSI command mode per flo in due commit con
+Signed-off-by (`a7728b56a`, `fc6a7e056`) e un pacchetto armv7 r51
+(`6c40c96`). Nove test KUnit passano e la build APK completa riesce;
+SHA-256 dell'APK `31b876f568091137cb5b5ae967dd7aecf212cc1c198b1583f61d98022971261e`.
+La simulazione dell'upgrade offline passa. `/boot` e p22 coincidevano prima
+del riavvio, con i file r50 conservati come `.previous`.
+
+Dopo il riavvio r51 non è tornato raggiungibile via Wi-Fi. Il journal
+persistente termina allo spegnimento r50 delle 17:04:38: non contiene un
+avvio r51 arrivato a journald. La causa esatta resta sconosciuta. La review
+ha inoltre rilevato che, se manca la conclusione DMA, la transazione
+command mode può bloccare il commit; il candidato non è pronto per l'uso.
+Non è stata eseguita una prova della luminosità su r51.
+
+Ripristinato r50 da TWRP via ADB: downgrade dell'APK nel rootfs, `depmod`,
+`mkinitfs` e sincronizzazione della partizione p22. I checksum di kernel,
+initramfs e DTB su `/boot` e p22 coincidono con l'archivio r50. Dopo il
+riavvio Wi-Fi e greetd sono attivi, APK r50 installato e batteria al 100%.
+La verifica fisica di PIN e touch è ancora in attesa dell'utente. Il glitch
+resta aperto; non pubblicare r51 come correzione.
+
 ### Epiphany su pagine complesse — 2026-11-18
 
 Misurati cinque caricamenti a freddo e a caldo del motore WebKitGTK 2.54.2

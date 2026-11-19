@@ -32,6 +32,20 @@ The bootable r50 APK and a host archive of both matching boot copies are
 retained for recovery; archive SHA-256
 `d4b1633bf3cd43ec3892afe2a71d9ec76cb149ae85be1f6583cf2043f3372f95`.
 
+### r51 command-mode candidate (failed boot)
+
+The first full MDP4 command-mode candidate compiled as an armv7 APK and
+passed nine KUnit tests. It did not reach Wi-Fi or journald after reboot;
+there was no opportunity for the planned physical brightness comparison.
+TWRP recovery restored the verified r50 APK and both boot copies, and r50
+returned on Wi-Fi with greetd active. The cause of the r51 boot failure is
+unknown. The code review also identified an unsafe timeout design: a late
+DMA completion could be misattributed to the next frame. The candidate
+now waits for the real completion, but a missing TE/IRQ can block the boot
+commit indefinitely. A bounded and hardware-backed recovery path and a
+diagnostic boot are required before another normal install. r51 must not be
+published or described as a brightness fix.
+
 ## Confirmed shell fault
 
 On r23 with flo-shell r8, the UI selected brightnessctl because the executable
