@@ -1062,6 +1062,22 @@ attivi, APK e hash di `/boot` corrispondenti a r50, nessun nuovo errore
 ext4/MMC/MDP nel journal. L'utente ha confermato l'accesso dal PIN dopo
 questo avvio.
 
+r56 aggiunge una traccia dei primi quattro kickoff MDP4 senza modificare la
+gestione del frame. Checkpatch, 12 test KUnit, build armv7 e simulazione
+upgrade riusciti. Avviato con DMA escluso, Wi-Fi e greetd attivi. Alla prova,
+il primo kickoff a 55,509717 s aveva `DISP_STATUS=0`, `OVERLAY_FLUSH=0x11` e
+`INTR_STATUS=0x800`; la callback di completamento è arrivata dopo soli
+97 microsecondi con `DISP_STATUS=5`. Il secondo kickoff, 14,4 ms dopo,
+partiva già con `DISP_STATUS=5` e si è bloccato. Il completamento iniziale è
+troppo rapido per un frame RGB 1200×1920; il significato preciso dei bit di
+`DISP_STATUS` richiede ancora conferma. Il driver stock imposta indirizzo e
+stride della DMA primaria dal framebuffer, mentre il percorso DRM attuale li
+lascia a zero: differenza concreta da verificare prima di modificarla.
+Log completo in `build/r56-kernel-trace-20261119.log`. r50 è stato reinstallato
+via Wi-Fi e verificato su entrambe le copie di boot. Dopo sync/remount/reboot
+d'emergenza, r50 è tornato con Wi-Fi e servizi attivi, senza nuovi errori
+ext4/MMC/MDP; il greeter PIN è visibile. Conferma di login e touch attesa.
+
 ### Epiphany su pagine complesse — 2026-11-18
 
 Misurati cinque caricamenti a freddo e a caldo del motore WebKitGTK 2.54.2

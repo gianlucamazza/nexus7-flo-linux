@@ -145,6 +145,40 @@ uptime, greetd, NetworkManager and flo-sessiond active. The installed package
 and `/boot` hashes match r50; the new kernel journal has no ext4, MMC or MDP
 timeout errors. The user confirmed successful PIN login after this boot.
 
+### r56 first-frame transition trace
+
+r56 keeps r55's VSYNC setup and diagnostic DMA gate, adding MDP register
+snapshots around the first four command kickoffs. The trace-only patch passed
+checkpatch and 12 KUnit tests; the armv7 APK built and the offline upgrade
+simulation passed. On the tablet r56 booted with the gate active, Wi-Fi and
+greetd running, and the VSYNC clock enabled at 27 MHz. With the gate lifted:
+
+| Time since boot | Event | `DISP_STATUS` | `OVERLAY_FLUSH` | `INTR_STATUS` |
+| --- | --- | --- | --- | --- |
+| 55.509717 s | Frame 1 before kick | `0` | `0x11` | `0x800` |
+| 55.509814 s | Frame 1 completion callback | `5` | `0x10` | `0` |
+| 55.524190 s | Frame 2 before kick | `5` | `0x11` | `0` |
+| 55.646737 s | Frame 2 timeout | `5` | `0x11` | `0` |
+
+The first callback followed kickoff by only 97 microseconds, far too short
+for a 1200×1920 RGB frame to cross DSI. The second kick occurred 14.4 ms later
+while `DISP_STATUS` was still `5`. The raw register has no decoded bitfields
+in the current MDP4 register definitions, so `5` is not yet labelled as a
+specific busy condition. The evidence supports a false or premature first
+completion, or an uncompleted first transfer; it does not yet distinguish
+these causes. The full kernel log is in
+`build/r56-kernel-trace-20261119.log`.
+
+The stock Flo command path writes the primary DMA source address and stride
+from the framebuffer; the current DRM command path leaves both zero because
+the video path takes pixels from an overlay pipe. This is a concrete
+configuration difference to validate before changing it. r50 was restored
+over Wi-Fi, and kernel, initramfs and DTB on both boot copies matched the
+archived hashes. An emergency sync/remount/reboot returned the tablet to r50;
+Wi-Fi, greetd, NetworkManager and flo-sessiond are active, with no new ext4,
+MMC or MDP timeout in the boot journal. The user sees the PIN greeter;
+login/touch confirmation for this boot is pending.
+
 ## Confirmed shell fault
 
 On r23 with flo-shell r8, the UI selected brightnessctl because the executable
