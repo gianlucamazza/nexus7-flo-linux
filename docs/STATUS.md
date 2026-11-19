@@ -1046,6 +1046,19 @@ PIN, accesso e touch. Il codice stock programma anche il contatore di
 sincronismo MDP e abilita `mdp_vsync_clk`, operazioni assenti nel candidato;
 vanno implementate e verificate prima di una nuova prova. Glitch ancora aperto.
 
+r55 aggiunge il clock VSYNC MDP4 al Device Tree, lo abilita nel percorso
+command mode e configura contatore, linea iniziale, uscita e soglia come nel
+driver stock. Dodici test KUnit sono passati; build armv7 e simulazione
+upgrade riuscite. Sul tablet il clock reale è 27 MHz ed era abilitato.
+r55 è partito con DMA diagnostico escluso; Wi-Fi e greetd erano attivi.
+Abilitato il DMA e riavviato greetd, il primo frame è terminato, ma il secondo
+si è bloccato ancora oltre 100 ms con gli stessi registri di r54. Il solo
+clock VSYNC non risolve il difetto. Prima della perdita della rete l'APK r50
+è stato reinstallato via Wi-Fi e kernel, initramfs e DTB delle due copie di
+boot sono stati verificati contro gli hash r50. La richiesta di riavvio
+normale è scaduta mentre r55 era bloccato; spegnimento forzato e conferma
+fisica del riavvio r50 ancora in attesa.
+
 ### Epiphany su pagine complesse — 2026-11-18
 
 Misurati cinque caricamenti a freddo e a caldo del motore WebKitGTK 2.54.2

@@ -124,6 +124,24 @@ The stock driver also programs the MDP sync counter (`0x100`), initial line
 registers. This is a concrete integration gap to test next, including clock
 lifetime and IRQ behaviour. Do not ship r54 or describe the glitch as fixed.
 
+### r55 VSYNC counter probe
+
+r55 adds the MDP VSYNC clock to the APQ8064 Device Tree and binding, obtains
+and enables it in the MDP4 command encoder, and programs the stock sync
+counter, initial line, output control and threshold registers. The counter is
+derived from the actual clock rate and DRM mode. Twelve KUnit tests passed,
+including new counter/configuration cases; the armv7 package built, and the
+offline upgrade simulation passed. On the tablet, the clock ran at 27 MHz and
+had enable count 1. r55 booted with frame DMA skipped and Wi-Fi/greetd active.
+After enabling frame DMA and restarting greetd, the first command frame
+completed, but the second stalled again at 100 ms with
+`INTR_ENABLE=0x0d10`, `INTR_STATUS=0`, `DISP_STATUS=5`, `TEAR_CHECK_EN=1`,
+`OVERLAY_FLUSH=0x11`. The VSYNC clock gap is real but insufficient to fix
+this second-frame failure. While Wi-Fi still worked, the verified r50 APK
+was installed and the kernel, initramfs and DTB on `/boot` and p22 matched
+their r50 hashes. A normal reboot request timed out while the old r55 kernel
+was blocked; forced power cycling and physical boot confirmation are pending.
+
 ## Confirmed shell fault
 
 On r23 with flo-shell r8, the UI selected brightnessctl because the executable
