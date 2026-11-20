@@ -220,3 +220,9 @@ debug symbols and their temporary `/usr/lib/debug/lib` symlink were removed;
 Epiphany 50.6 and WebKitGTK 2.54.2 remained installed. The tablet session
 was unlocked and responded to `flo-shell`, with idle inhibition off,
 and the battery controller reported `Full`, 100%.
+
+On 20 November, `apk update` completed successfully against the configured
+postmarketOS and Alpine edge repositories. `apk policy` still offered only
+Epiphany `50.6-r0` and `webkit2gtk-6.0` `2.54.2-r2` for this tablet, the same
+versions already installed. The planned 2.54.3 comparison therefore has no
+packaged candidate yet; no browser package or profile was changed.

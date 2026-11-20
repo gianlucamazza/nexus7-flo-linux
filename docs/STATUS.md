@@ -21,6 +21,23 @@ La chiave SSH diagnostica resta sul tablet, come richiesto. Le sezioni sotto
 documentano la cronologia: i loro stati intermedi non sostituiscono questo
 riepilogo.
 
+### Shell r3 e sospensione
+
+La [PR flo-shell #6](https://github.com/gianlucamazza/flo-shell/pull/6)
+attende la conferma `WlSessionLock.secure` prima della richiesta Suspend a
+logind. Il ramo è stato aggiornato sulla shell che include le Impostazioni
+agenti; `make check` e la CI passano. Il pacchetto locale
+`flo-shell-0.1_git20261118-r3.apk` ha SHA-256
+`9088063dd8024d5043476858374dd622742b22d3471fe86da6447c917518e33e`.
+Sul tablet l'upgrade r2→r3 ha modificato solo flo-shell e ha conservato
+`/etc/pam.d/flo-shell`; l'APK r2 verificato resta in `/var/tmp` per il
+ripristino. Dopo il restart della shell, la prova Power/DPMS ha riportato
+`locked=true`, `lockSecure=true` con display prima spento e poi acceso;
+nessuna unità systemd è fallita. L'utente ha confermato PIN, accesso e touch;
+la shell riporta `locked=false`, `lockSecure=false` e display acceso dopo lo
+sblocco. Questa prova non supera il distinto errore A320 nella sospensione
+del sistema.
+
 ## Cronologia iniziale — 8 novembre 2026
 
 ## Preparato
