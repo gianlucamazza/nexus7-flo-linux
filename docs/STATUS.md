@@ -16,6 +16,8 @@ accelerometro non sono ancora esposti tramite ALSA e IIO. Gli altri limiti e
 le prove necessarie sono nel [registro](hw/ANALYSIS-20261118.md) e nella
 [matrice hardware](hw/MATRIX.md); la [traccia DSI](hw/DSI-BRIGHTNESS.md)
 separa i dati misurati dalle ipotesi.
+L'[ordine operativo](hw/NEXT-20261120.md) collega tutte le issue aperte ai
+prossimi esperimenti e ai criteri di chiusura.
 
 La chiave SSH diagnostica resta sul tablet, come richiesto. Le sezioni sotto
 documentano la cronologia: i loro stati intermedi non sostituiscono questo
@@ -23,7 +25,8 @@ riepilogo.
 
 ### Shell r3 e sospensione
 
-La [PR flo-shell #6](https://github.com/gianlucamazza/flo-shell/pull/6)
+La [PR flo-shell #6](https://github.com/gianlucamazza/flo-shell/pull/6), ora
+unita in `main`,
 attende la conferma `WlSessionLock.secure` prima della richiesta Suspend a
 logind. Il ramo è stato aggiornato sulla shell che include le Impostazioni
 agenti; `make check` e la CI passano. Il pacchetto locale
