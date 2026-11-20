@@ -1094,15 +1094,22 @@ hash di `/boot` corretti e nessun nuovo errore ext4/MMC/MDP. Il tablet carica
 con corrente positiva. L'utente ha confermato PIN, accesso e touch funzionanti
 dopo quest'ultimo ripristino.
 
-r58 è pronto per una prova diagnostica, ma non è installato. Leggerà stato
+r58 è avviato per una prova diagnostica. Leggerà stato
 del controller, trigger, interrupt e FIFO DSI prima e dopo i primi due frame
 command mode, con il controller alimentato e runtime PM attivo, senza
 modificare la gestione del frame. Commit kernel `f22193881`, package
 `5d5d976`; checkpatch, 12 KUnit, build armv7 e simulazione upgrade da r50
 riusciti. APK SHA-256
 `adcc346638f0f625dfc31c72b6f85d36f13abe479ba8671c78ca70ecd019e509`;
-copiato su `/var/tmp/nexus7-dsi-host-status-r58.apk`. Il tablet resta su
-r50 in carica finché non sarà confermata una finestra con recovery USB.
+copiato su `/var/tmp/nexus7-dsi-host-status-r58.apk`. Prima dell'upgrade sono
+stati salvati `/boot`, database APK, moduli e avvio lk2nd di r50. Lo script
+d'installazione si è fermato su una condizione obsoleta (`msm.fbdev=0`),
+assente anche nella configurazione di avvio r50 funzionante. La configurazione
+r58 era identica a r50; sincronizzazione completata e quattro file di boot
+confrontati tra `/boot` e lk2nd. r58 è ripartito con DMA diagnostico escluso:
+Wi-Fi, greetd, NetworkManager e flo-sessiond attivi. APK e script di ripristino
+r50 sono pronti sul tablet. Non è ancora stato attivato il primo frame;
+attesa conferma fisica di PIN e touch dopo il riavvio.
 
 ### Epiphany su pagine complesse — 2026-11-18
 

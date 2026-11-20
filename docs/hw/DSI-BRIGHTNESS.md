@@ -227,8 +227,15 @@ active. It does not change frame completion. Kernel source commit
 the armv7 package built, and a simulated tablet upgrade from r50 passed.
 The APK SHA-256 is
 `adcc346638f0f625dfc31c72b6f85d36f13abe479ba8671c78ca70ecd019e509`.
-It is staged at `/var/tmp/nexus7-dsi-host-status-r58.apk` on the tablet but
-is not installed. r50 remains active until a recovery-capable test window.
+It was installed after a verified r50 backup of `/boot`, APK database,
+modules, and lk2nd boot files. The installation script stopped at an obsolete
+`msm.fbdev=0` assertion: that option was absent from the working r50 boot
+configuration too. The r58 boot configuration was byte-identical to r50,
+so the boot sync was completed and all four files compared across `/boot`
+and lk2nd. r58 booted with diagnostic frame DMA disabled; Wi-Fi, greetd,
+NetworkManager, and flo-sessiond are active. The r50 APK and verified
+rollback script are staged on the tablet. The first-frame probe has not
+been triggered; physical PIN/touch confirmation is pending.
 
 The verified r50 APK was reinstalled over Wi-Fi. Kernel, initramfs and DTB
 on both boot copies matched the archived r50 hashes before reboot. An
