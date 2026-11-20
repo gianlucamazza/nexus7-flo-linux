@@ -1,4 +1,27 @@
-# Stato del progetto — 2026-11-08
+# Stato del progetto
+
+## Stato corrente — 20 novembre 2026
+
+Il Nexus 7 flo avvia Linux con il kernel r50: greeter, accesso con PIN, touch e
+Wi-Fi sono stati confermati sul dispositivo. Dopo le prove diagnostiche DSI
+r51–r58, r50 è stato ripristinato e le due copie di boot sono state confrontate
+con il backup. Il greeter e i servizi di rete/sessione risultano attivi.
+
+Il glitch fisico durante i cambi di luminosità rimane. r58 ha ristretto la
+ricerca al passaggio MDP4/DSI in command mode, ma il secondo frame si blocca e
+nessun kernel diagnostico successivo a r50 è pronto per l'uso quotidiano.
+La sospensione del sistema si ferma ancora nel driver A320 alla prova dei
+device; blocco schermo e DPMS funzionano nelle prove coperte. Audio e
+accelerometro non sono ancora esposti tramite ALSA e IIO. Gli altri limiti e
+le prove necessarie sono nel [registro](hw/ANALYSIS-20261118.md) e nella
+[matrice hardware](hw/MATRIX.md); la [traccia DSI](hw/DSI-BRIGHTNESS.md)
+separa i dati misurati dalle ipotesi.
+
+La chiave SSH diagnostica resta sul tablet, come richiesto. Le sezioni sotto
+documentano la cronologia: i loro stati intermedi non sostituiscono questo
+riepilogo.
+
+## Cronologia iniziale — 8 novembre 2026
 
 ## Preparato
 
