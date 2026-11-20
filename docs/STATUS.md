@@ -1120,7 +1120,7 @@ senza escludere attività intermedia. Log in
 verificato con hash su entrambe le copie di boot; il riavvio ordinario non
 terminava e si è usato sync/remount/reboot SysRq. r50 è ripartito con nuovo
 uptime, servizi attivi e nessun errore ext4/MMC/MDP nel nuovo journal.
-Attesa conferma fisica di PIN, accesso e touch dopo questo ripristino.
+L'utente ha confermato PIN, accesso e touch funzionanti dopo questo ripristino.
 
 ### Epiphany su pagine complesse — 2026-11-18
 

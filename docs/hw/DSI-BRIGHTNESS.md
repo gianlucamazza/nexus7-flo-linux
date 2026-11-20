@@ -267,8 +267,8 @@ on both boot copies matched archived r50 hashes. The ordinary reboot did
 not complete with the second frame stalled, so sync/remount/reboot via
 SysRq was used. r50 returned with fresh uptime, Wi-Fi, greetd,
 NetworkManager and flo-sessiond active; `/boot` hashes match r50, and the
-new boot journal has no ext4, MMC or MDP timeout errors. Physical PIN and
-touch confirmation after this rollback is pending.
+new boot journal has no ext4, MMC or MDP timeout errors. The user confirmed
+PIN login and working touch after this rollback.
 
 ## Confirmed shell fault
 
