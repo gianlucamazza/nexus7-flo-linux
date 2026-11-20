@@ -46,6 +46,14 @@ cable reconnect reports `ddr_dt_reservation=missing` and
 `ddr_memory_check=overlaps-system-ram`. This is the expected unsafe baseline
 against which the r32 boot will be compared; DSPS was not started.
 
+The same read-only schema-2 audit on the current r50 boot (20 November)
+still reports `ddr_dt_reservation=missing` and
+`ddr_memory_check=overlaps-system-ram`. The live System RAM range intersects
+the full 1 MiB DSPS DDR window. No DSPS start or firmware modification was
+attempted. This confirms that the r50 baseline still cannot safely launch
+DSPS; the isolated carveout/remoteproc branch needs its own boot and memory
+validation before any sensor protocol experiment.
+
 ## Primary-source baseline
 
 Vendor kernel sources below are pinned to AOSP commit
