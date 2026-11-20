@@ -1094,7 +1094,7 @@ hash di `/boot` corretti e nessun nuovo errore ext4/MMC/MDP. Il tablet carica
 con corrente positiva. L'utente ha confermato PIN, accesso e touch funzionanti
 dopo quest'ultimo ripristino.
 
-r58 è avviato per una prova diagnostica. Leggerà stato
+r58 è stato provato sul tablet. Ha letto stato
 del controller, trigger, interrupt e FIFO DSI prima e dopo i primi due frame
 command mode, con il controller alimentato e runtime PM attivo, senza
 modificare la gestione del frame. Commit kernel `f22193881`, package
@@ -1108,8 +1108,19 @@ assente anche nella configurazione di avvio r50 funzionante. La configurazione
 r58 era identica a r50; sincronizzazione completata e quattro file di boot
 confrontati tra `/boot` e lk2nd. r58 è ripartito con DMA diagnostico escluso:
 Wi-Fi, greetd, NetworkManager e flo-sessiond attivi. APK e script di ripristino
-r50 sono pronti sul tablet. Non è ancora stato attivato il primo frame;
-attesa conferma fisica di PIN e touch dopo il riavvio.
+r50 erano pronti sul tablet. Con DMA disabilitato il greeter restava visibile
+ma non poteva aggiornare i frame; servizi e Wi-Fi erano attivi. Attivato il
+DMA una sola volta e riavviato greetd, il primo frame MDP si è completato
+dopo 22,3 ms e il secondo si è bloccato dopo 105,7 ms. Nei quattro campioni
+prima/dopo i kickoff DSI `CTRL=0x1f5`, `TRIG_CTRL=0x80000004`,
+`STATUS0=0`, `INTR_CTRL=0x02020200`, `FIFO_STATUS=0x11111000`; contatore IRQ
+DSI fermo a 22. `STATUS0=0` indica inattività nei soli istanti campionati,
+senza escludere attività intermedia. Log in
+`build/r58-after-probe-20261120.log`. r50 è stato reinstallato via Wi-Fi,
+verificato con hash su entrambe le copie di boot; il riavvio ordinario non
+terminava e si è usato sync/remount/reboot SysRq. r50 è ripartito con nuovo
+uptime, servizi attivi e nessun errore ext4/MMC/MDP nel nuovo journal.
+Attesa conferma fisica di PIN, accesso e touch dopo questo ripristino.
 
 ### Epiphany su pagine complesse — 2026-11-18
 

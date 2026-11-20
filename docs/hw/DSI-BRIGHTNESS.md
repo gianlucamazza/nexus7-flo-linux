@@ -207,6 +207,12 @@ counter remained at 22 during this test. The complete trace is in
 whether the first frame reached the panel or why the second stopped. r57 is
 diagnostic only and is not a fix for the brightness glitch.
 
+The verified r50 APK was reinstalled over Wi-Fi. Kernel, initramfs and DTB
+on both boot copies matched the archived r50 hashes before reboot. An
+emergency sync/remount/reboot returned the tablet to r50; Wi-Fi, greetd,
+NetworkManager and flo-sessiond were active. The user confirmed PIN login
+and working touch after this rollback.
+
 The current DSI host enables `CMD_MDP_DONE` in command mode, while its IRQ
 handler has no completion branch for that event. Stock MDP4 command mode
 tracks DSI MDP completion separately from MDP overlay/DMA completion and
@@ -233,17 +239,36 @@ modules, and lk2nd boot files. The installation script stopped at an obsolete
 configuration too. The r58 boot configuration was byte-identical to r50,
 so the boot sync was completed and all four files compared across `/boot`
 and lk2nd. r58 booted with diagnostic frame DMA disabled; Wi-Fi, greetd,
-NetworkManager, and flo-sessiond are active. The r50 APK and verified
-rollback script are staged on the tablet. The first-frame probe has not
-been triggered; physical PIN/touch confirmation is pending.
+NetworkManager, and flo-sessiond were active, but the displayed greeter
+could not update. This was the expected effect of suppressing frame DMA,
+not evidence of a greeter crash.
+
+After enabling frame DMA once and restarting greetd, the r58 trace recorded:
+
+| Event | MDP result | DSI `STATUS0` | DSI `INTR_CTRL` |
+| --- | --- | --- | --- |
+| Frame 1 before kick, 1432.135 s | `DISP_STATUS=0` | `0` | `0x02020200` |
+| Frame 1 MDP completion, 1432.158 s | `DISP_STATUS=5` | `0` | `0x02020200` |
+| Frame 2 before kick, 1432.172 s | `DISP_STATUS=5` | `0` | `0x02020200` |
+| Frame 2 timeout, 1432.278 s | `DISP_STATUS=5` | `0` | `0x02020200` |
+
+DSI `CTRL=0x1f5`, `TRIG_CTRL=0x80000004`, and
+`FIFO_STATUS=0x11111000` at all four sampled points. The DSI IRQ count
+remained 22 before and after the probe. `STATUS0=0` says the DSI host was
+idle *at the sampled instants*; it cannot exclude a transfer between
+samples. `INTR_CTRL` has the `CMD_MDP_DONE` mask enabled but no completion
+status bit set. The first MDP completion took 22.3 ms; the second timed out
+after 105.7 ms. The trace is in `build/r58-after-probe-20261120.log`.
+These observations narrow the failure to the MDP4 command-frame path or
+its handoff to DSI; they do not establish a final cause.
 
 The verified r50 APK was reinstalled over Wi-Fi. Kernel, initramfs and DTB
-on both boot copies matched the archived r50 hashes before reboot. An
-emergency sync/remount/reboot returned the tablet to r50: Wi-Fi, greetd,
-NetworkManager and flo-sessiond are active, `/boot` matches r50, and the
-new boot journal contains no ext4, MMC or MDP timeout errors. The wall
-charger reports positive current. The user confirmed PIN login and working
-touch after this rollback.
+on both boot copies matched archived r50 hashes. The ordinary reboot did
+not complete with the second frame stalled, so sync/remount/reboot via
+SysRq was used. r50 returned with fresh uptime, Wi-Fi, greetd,
+NetworkManager and flo-sessiond active; `/boot` hashes match r50, and the
+new boot journal has no ext4, MMC or MDP timeout errors. Physical PIN and
+touch confirmation after this rollback is pending.
 
 ## Confirmed shell fault
 
