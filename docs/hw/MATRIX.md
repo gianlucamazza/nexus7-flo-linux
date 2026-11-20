@@ -6,6 +6,21 @@ kernel; the patches below were only applied and compiled to a dtb. For the
 current device status, see [ISSUES-20261117.md](ISSUES-20261117.md). For the
 sensor investigation, see [SENSORS.md](SENSORS.md).
 
+## Live inventory, r50, 20 November 2026
+
+This is a sysfs/device-node inventory of the running tablet. It records what
+the current kernel exposes, not proof that every absent part is fitted or
+faulty. The historical source and config matrix below remains unchanged.
+
+| Area | Observed on the tablet | Remaining proof |
+|---|---|---|
+| Display, input and storage | DSI-1 and a DRM render node; Elan touch and Power/volume key devices; bootable eMMC | DSI brightness corruption and extended eMMC fault tests remain open. |
+| Wireless | WCNSS remoteproc running; `hci0` exists | Reproduce intermittent PAS startup and finish Bluetooth pairing/long-run tests. |
+| Audio and DSPS sensors | No ALSA card, IIO device or DSPS remoteproc | Codec/transport and calibrated sensor measurements are missing. |
+| Charging and sleep | `smb347-usb`, fuel gauge and USB source exist; only `[s2idle]`; `cpuidle.off=1` | Long-run source/OTG tests, GPU device suspend and SPC wake remain open. |
+| Minor input and indicators | No `SW_LID` input device or LED class device; five thermal zones exist | Verify Hall polarity, LED current limit and ADC readings physically. |
+| I2C and optional peripherals | `0-0052` names a 24c128 but has no bound driver; no video node, external DRM connector or GPS/NFC interface | Confirm each chip and its power/bus/firmware before adding a driver. The EEPROM node alone does not prove the chip is fitted. |
+
 ## Sources
 
 | Tag | What | Where |

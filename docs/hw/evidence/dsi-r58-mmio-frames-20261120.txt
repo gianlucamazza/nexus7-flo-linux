@@ -1,0 +1,9 @@
+[    3.705399] [   T44] mdp4 5100000.display-controller: MDP4 diagnostic: frame DMA disabled
+[   59.070672] [   T65] mdp4 5100000.display-controller: MDP4 diagnostic: frame 1 before kick: disp=00000000 flush=00000011 irq=00000800 dma_base=01abd000 dma_stride=00001300
+[   59.070748] [   T65] msm_dsi 4700000.dsi: DSI diagnostic: frame 1 before kick: ctrl=000001f5 trig=80000004 status=00000000 intr=02020200 fifo=11111000
+[   59.089774] [   T65] mdp4 5100000.display-controller: MDP4 diagnostic: frame 1 completed: disp=00000005 flush=00000010 irq=00000000
+[   59.089817] [   T65] msm_dsi 4700000.dsi: DSI diagnostic: frame 1 MDP completion: ctrl=000001f5 trig=80000004 status=00000000 intr=02020200 fifo=11111000
+[   59.095487] [  T603] mdp4 5100000.display-controller: MDP4 diagnostic: frame 2 before kick: disp=00000005 flush=00000011 irq=00000000 dma_base=038bd000 dma_stride=00001300
+[   59.095516] [  T603] msm_dsi 4700000.dsi: DSI diagnostic: frame 2 before kick: ctrl=000001f5 trig=80000004 status=00000000 intr=02020200 fifo=11111000
+[   59.202419] [  T603] mdp4 5100000.display-controller: MDP4 command frame 2 stalled: irq_en=00000d10 irq_status=00000000 disp=00000005 tear=00000001 flush=00000011
+[   59.202444] [  T603] msm_dsi 4700000.dsi: DSI diagnostic: frame 2 timeout: ctrl=000001f5 trig=80000004 status=00000000 intr=02020200 fifo=11111000

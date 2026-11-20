@@ -270,6 +270,38 @@ NetworkManager and flo-sessiond active; `/boot` hashes match r50, and the
 new boot journal has no ext4, MMC or MDP timeout errors. The user confirmed
 PIN login and working touch after this rollback.
 
+### r58 read-only MMIO sampling (20 November 2026)
+
+The existing r58 diagnostic APK was installed again with its frame-DMA gate
+enabled at boot. Both r50 boot copies and the local rollback APK had matching
+archived hashes before installation. A read-only `/dev/mem` sampler mapped the
+MDP4 and DSI register pages, recorded register transitions at a nominal
+500 µs interval for 20 seconds, and completed 40,000 samples. Sampling was
+confirmed active before frame DMA was enabled and greetd restarted. The
+[register samples](evidence/dsi-r58-mmio-samples-20261120.csv) and
+[matching kernel frame log](evidence/dsi-r58-mmio-frames-20261120.txt) are
+saved separately; the userspace monotonic clock and kernel log timestamps
+have different boot-time offsets, so raw timestamps are not directly
+interchangeable.
+
+The first MDP frame completed after about 19 ms; the second timed out after
+about 107 ms. MDP `DISP_STATUS` changed from `0` to `5` at the first frame
+and stayed `5`. `OVERLAY_FLUSH` changed from `0x11` to `0x10`, then back to
+`0x11` before the second frame and remained there. Across all samples, DSI
+`STATUS0` stayed `0`, `FIFO_STATUS` stayed `0x11111000`, `INTR_CTRL` stayed
+`0x02020200`, and `CLK_STATUS` stayed `0x35f`; no `CMD_MDP_DONE` status was
+observed. Transient MDP read-pointer interrupt status `0x800` continued
+after the stall, so the read-pointer path had not simply stopped.
+The sampler cannot exclude DSI activity shorter than its sampling period;
+these measurements do not yet prove whether the first frame crossed the DSI
+link. The next driver investigation must distinguish MDP DMA completion from
+DSI transfer completion and validate the overlay-flush/host handoff against
+the stock command path before changing the completion policy.
+
+The verified r50 APK was restored, then both Linux boot copies matched their
+r50 hashes. The tablet rebooted to r50 with greetd, Wi-Fi and flo-sessiond
+active; the user confirmed PIN login and touch. r58 remains diagnostic only.
+
 ## Confirmed shell fault
 
 On r23 with flo-shell r8, the UI selected brightnessctl because the executable
