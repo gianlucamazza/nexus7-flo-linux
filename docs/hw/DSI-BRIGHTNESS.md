@@ -298,6 +298,19 @@ link. The next driver investigation must distinguish MDP DMA completion from
 DSI transfer completion and validate the overlay-flush/host handoff against
 the stock command path before changing the completion policy.
 
+A source comparison after this trace found no simple DSI trigger mismatch:
+the stock Flo [panel settings](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-marshmallow/drivers/video/msm/mipi_JDI_1080P_pt.c)
+select TE, MDP trigger none, software DMA trigger and stream 0. The stock
+[host setup](https://android.googlesource.com/kernel/msm/+/android-msm-flo-3.4-marshmallow/drivers/video/msm/mipi_dsi_host.c)
+therefore builds `DSI_TRIG_CTRL=0x80000004`, matching r58. Stock also sets
+the command DMA control to `0x14000000`; that register was not part of the
+r58 live sample and must be measured before treating it as matched. The
+stock MDP4 command path waits for DMA_P completion before another direct
+frame and commits queued DCS commands before kickoff. The current r58
+implementation also serializes its MDP kicks, but the first MDP completion
+did not coincide with an observed DSI `CMD_MDP_DONE`. A timing or handoff
+fault remains a hypothesis, not a reason to drop completion waiting.
+
 The verified r50 APK was restored, then both Linux boot copies matched their
 r50 hashes. The tablet rebooted to r50 with greetd, Wi-Fi and flo-sessiond
 active; the user confirmed PIN login and touch. r58 remains diagnostic only.
